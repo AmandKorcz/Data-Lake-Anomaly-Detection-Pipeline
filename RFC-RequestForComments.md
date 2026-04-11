@@ -158,14 +158,21 @@ Com isso, o projeto busca transformar um processo atualmente manual e descentral
 
 O projeto será avaliado por meio de indicadores que medem tanto o desempenho técnico da solução quanto o impacto nas análises financeiras. Os principais indicadores definidos são:
 
- - Redução de tempo de identificação de inconsistências, diminuindo em pelo menos 50% o tempo médio necessário para identificar inconsistências na Margem de Contribuição em comparação com o processo atual. 
+ - **Redução de tempo de identificação de inconsistências**  
+  Reduzir em pelo menos 50% o tempo médio necessário para identificar inconsistências na Margem de Contribuição, em comparação com o processo atual, contribuindo para maior agilidade no processo de fechamento financeiro.
 
- - Precisão do modelo na detecção de anomalias, atingindo uma taxa mínima de 75% de precisão na identificação de comportamentos anômalos relevantes nos dados financeiros analisados. 
+ - **Precisão do modelo na detecção de anomalias**  
+  Atingir uma taxa mínima de 75% de precisão na identificação de comportamentos anômalos relevantes nos dados financeiros analisados, assegurando maior confiabilidade nos resultados gerados pelo modelo.
 
- - Otimização do tempo de processamento do pipeline de dados, garantindo que os dados sejam processados e analisados em menos de 15 minutos após sua disponibilização no data lake. 
+ - **Otimização do tempo de processamento do pipeline de dados**   
+  Garantir que os dados sejam processados e disponibilizados para análise em até 15 minutos após sua ingestão no data lake, assegurando agilidade na disponibilização das informações.
 
- - Permitir que os alertas automáticos sejam gerados em até 5 minutos após a identificação de uma possível inconsistência.
+ - **Tempo de geração de alertas automáticos**  
+  Garantir que alertas automáticos sejam emitidos em até 5 minutos após a identificação de possíveis inconsistências, viabilizando uma atuação proativa na identificação e tratamento de inconsistências.
 
- - Sensibilidade do modelo de detecção de anomalias, garantindo que pelo menos 80% das inconsistências reais sejam identificadas, minimizando o risco de erros financeiros não detectados durante o processo de fechamento. 
+ - **Sensibilidade (recall) do modelo de detecção de anomalias**  
+  Garantir que pelo menos **80% das inconsistências reais** sejam identificadas, reduzindo o risco de erros financeiros não detectados durante o processo de fechamento.
+
+ Esses indicadores permitem avaliar não apenas o desempenho técnico da solução, mas também o seu impacto direto na eficiência do processo de fechamento financeiro e na confiabilidade das informações utilizadas pela organização.
 
  # 2. Engenharia de Requisitos 
