@@ -4,8 +4,8 @@
 - **Título do Projeto:** Data Lake Anomaly Detection Pipeline  
 - **Linha do Projeto:** Dados e IA (Machine Learning)  
 - **Autor:** Amanda Korczagin  
-- **Data da proposta:**  11/04/2026
-- **Versão:** 1.4  
+- **Data da proposta:**  24/05/2026
+- **Versão:** 2.2  
 
 ---
 
@@ -13,25 +13,25 @@
 
 ### 1.1. Contexto e problema 
 
-Em organizações que possuem múltiplas unidades de negócio ou empresas pertencentes a um mesmo grupo econômico, o processo de consolidação e análise de informações financeiras representa uma etapa crítica para a gestão corporativa, pois fornece suporte à tomada de decisão estratégica e ao controle gerencial (LAUDON, 2020). Após o fechamento contábil mensal, as equipes da área financeira realizam análises com o objetivo de validar os números consolidados, identificar possíveis inconsistências e garantir que os resultados divulgados representam corretamente a realidade operacional das empresas do grupo. 
+Em organizações que possuem múltiplas unidades de negócio ou empresas pertencentes a um mesmo grupo econômico, o processo de consolidação e análise de informações financeiras representa uma etapa crítica para a gestão corporativa, pois fornece suporte à tomada de decisão estratégica e ao controle gerencial (LAUDON, 2020). Após o fechamento contábil mensal, as equipes da área financeira realizam análises para validar os números consolidados, identificar possíveis inconsistências e garantir que os resultados divulgados reflitam corretamente a realidade operacional das empresas do grupo.  
 
-Nesse contexto, as atividades relacionadas a validação dos resultados financeiros são realizadas pelos mais variados times de finanças, que frequentemente executam verificações semelhantes utilizando métodos, consultas e bases de dados distintas para chegar às mesmas conclusões. Atualmente, essas análises são realizadas por meio da extração de dados do sistema ERP, utilização de planilhas eletrônicas e validações visuais. Embora esses procedimentos tenham sido mantidos nos últimos anos como parte de uma rotina organizacional, ele apresenta forte dependência de atividades manuais e pouca padronização entre as análises realizadas pelos diferentes times.
+Nesse contexto, as atividades relacionadas à validação dos resultados financeiros são realizadas pelos mais variados times de finanças, que frequentemente executam verificações semelhantes utilizando métodos, consultas e bases de dados distintas para chegar às mesmas conclusões. Atualmente, essas análises são realizadas por meio da extração de dados do sistema ERP, utilização de planilhas eletrônicas e validações visuais. Embora esses procedimentos tenham sido mantidos nos últimos anos como parte da rotina organizacional, eles apresentam forte dependência de atividades manuais e pouca padronização nas análises realizadas pelos diferentes times. 
 
 Essa diversidade de origem e formato de dados aumenta o esforço operacional, possibilita o surgimento de divergências na interpretação dos dados e torna a análise mais complexa diante do grande volume de informações envolvidas, elevando também o risco de atrasos na identificação de inconsistências de caráter crítico. 
 
-A validação da Margem de Contribuição é um dos pontos mais relevantes deste processo, dada sua importância para a análise de rentabilidade do grupo. Por evidenciar a capacidade de cada operação em cobrir custos fixos e gerar lucro (HORNGREN et al., 2012), este indicador exige precisão. Além disso, sob a perspectiva de dados, sua complexidade é elevada, uma vez que seu cálculo demanda a consolidação de um grande volume de transações operacionais provenientes de diferentes módulos do sistema ERP, envolvendo a correta classificação, agregação e associação entre receitas e custos variáveis ao longo do período analisado. 
+A validação da Margem de Contribuição é um dos pontos mais relevantes deste processo, por sua importância na análise de rentabilidade do grupo. Por evidenciar a capacidade de cada operação de cobrir custos fixos e gerar lucro (HORNGREN et al., 2012), este indicador exige precisão. Além disso, sob a perspectiva de dados, sua complexidade é elevada, uma vez que seu cálculo demanda a consolidação de um grande volume de transações operacionais provenientes de diferentes módulos do sistema ERP, envolvendo a correta classificação, agregação e associação entre receitas e custos variáveis ao longo do período analisado. 
 
 O desafio reside no fato de que inconsistências em nível granular, como custos atípicos ou rateios incorretos, tendem a ser mascaradas na composição dos dados gerenciais, fazendo com que anomalias passem despercebidas até que sejam evidenciadas por análises manuais detalhadas. A identificação tardia desses erros interrompe o fluxo de fechamento de rentabilidade, exigindo o rastreamento manual entre milhões de registros e o reprocessamento das análises e relatórios contábeis, o que gera um retrabalho significativo e compromete o prazo de liberação dos resultados financeiros do grupo. 
 
-Diante desse cenário, surge a necessidade de centralizar os dados transacionais em uma base integrada e automatizar a auditoria dos principais indicadores. A consolidação das informações em um _data lake_ permite processar grandes volumes de receitas e custos variáveis de forma estruturada e escalável, viabilizando análises mais rápidas e consistentes (KIMBALL; ROSS, 2013). Ainda, a aplicação da Análise Exploratória de Dados (AED) torna-se fundamental para compreender a distribuição das variáveis financeiras, identificar padrões sazonais e tratar de prévias inconsistências. Essa etapa, somada ao desenvolvimento de _dashboards_ gerenciais e algoritmos de _machine learning_ viabiliza a identificação precisa de anomalias e padrões atípicos, apoiando a tomada de decisão baseada em dados estrategicamente tratados (DAVENPORT, 2014). 
+Diante desse cenário, surge a necessidade de centralizar os dados transacionais em uma base de dados integrada e de automatizar a auditoria dos principais indicadores. A consolidação das informações em um data lake permite armazenar grandes volumes de receitas e custos variáveis de forma estruturada e escalável, viabilizando análises mais rápidas e consistentes (KIMBALL; ROSS, 2013). Além disso, a aplicação da Análise Exploratória de Dados (AED) torna-se fundamental para compreender a distribuição das variáveis financeiras, identificar padrões sazonais e tratar de inconsistências prévias. Essa etapa, somada ao desenvolvimento de dashboards gerenciais e algoritmos de machine learning viabiliza a identificação precisa de anomalias e padrões atípicos, apoiando a tomada de decisão baseada em dados estrategicamente tratados (DAVENPORT, 2014).  
 
-Assim, esse projeto propõe o desenvolvimento de um _pipeline_ de dados em nuvem voltado ao monitoramento da margem de contribuição, com o objetivo de reunir em um único ecossistema as as bases financeiras da organização e utilizar técnicas aplicadas de inteligência artificial para automatizar a detecção de anomalias, aumentando a precisão, agilidade e a confiabilidade do processo de fechamento financeiro do grupo. 
+Assim, neste projeto é proposto o desenvolvimento de um pipeline de dados em nuvem voltado ao monitoramento da margem de contribuição, com o objetivo de reunir em um único ecossistema as bases financeiras da organização e utilizar técnicas aplicadas de inteligência artificial para automatizar a detecção de anomalias, aumentando a precisão, agilidade e a confiabilidade do processo e das informações no fechamento financeiro do grupo. 
 
 ## 1.2. Origem da demanda e evidências 
 
-A origem da demanda deste projeto está diretamente ligada ao contexto organizacional de uma empresa manufatureira multinacional do setor industrial, com atuação global e sede na cidade de Joinville. Em um levantamento inicial, foi realizada uma reunião com os principais _focal points_ das equipes envolvidas no fechamento contábil, com o objetivo de identificar e compreender os desafios mais críticos enfrentados ao longo das etapas de execução, conclusão e análise desse ciclo.
+A origem da demanda deste projeto está diretamente ligada ao contexto organizacional de uma empresa manufatureira multinacional do setor industrial, com atuação global e sede em Joinville/SC. Em um levantamento inicial, foi realizada uma reunião com os principais focal points das equipes envolvidas no fechamento contábil, com o objetivo de identificar e compreender os desafios mais críticos enfrentados ao longo das etapas de execução, conclusão e análise desse ciclo. 
 
-Após a discussão inicial em conjunto, foram conduzidas interações individuais com as áreas de negócio, durante as quais foi possível coletar percepções atuais mais precisas e detalhar as principais dificuldades técnicas enfrentadas pelos times, bem como os impactos que afetam negativamente o andamento das atividades. 
+Após uma discussão inicial conjunta, foram conduzidas interações individuais com as áreas de negócio, nas quais foi possível coletar percepções atuais mais precisas e detalhar as principais dificuldades técnicas enfrentadas pelos times, bem como os impactos negativos no andamento das atividades. 
 
 Diante da coleta dessas informações, e após uma rodada extensa e complementar de pesquisa, foi possível concluir que o desenvolvimento de uma solução baseada na centralização de dados e automação analítica permitirá facilitar o apoio à identificação de inconsistências nos dados financeiros de forma mais eficiente. A iniciativa foi submetida à validação da área responsável pela disponibilização de recursos para execução de projetos, a qual demonstrou concordância quanto à relevância da proposta e a viabilidade de desenvolvimento em contexto acadêmico, conforme formalizado na Figura 1.
 
@@ -47,7 +47,7 @@ Diante da coleta dessas informações, e após uma rodada extensa e complementar
 
 ### 1.2.1. Conformidade à políticas internas da organização. 
 
-Durante o alinhamento com a área de gestão de projetos, também foi ressaltada a necessidade de garantir a confidencialidade das informações financeiras utilizadas na elaboração de relatório e desenvolvimento prático da solução proposta. Diante dessa diretriz, foi estabelecido que qualquer citação de dados reais deverá seguir rigorosamente as políticas de segurança e governança da organização, incluindo a anonimização ou mascaramento dos parâmetros sensíveis.
+Durante o alinhamento com a área de gestão de projetos, também foi ressaltada a necessidade de garantir a confidencialidade das informações financeiras utilizadas na elaboração de relatório e desenvolvimento prático da solução proposta. 
 
 Nesse contexto, o projeto foi estruturado de modo a não expor registros confidenciais, assegurando que os materiais acadêmicos não contenham informações que possam comprometer a integridade ou a privacidade dos dados corporativos, mantendo a conformidade com as políticas internas da empresa. 
 
@@ -55,7 +55,7 @@ Nesse contexto, o projeto foi estruturado de modo a não expor registros confide
 
 ### 1.3.1. Apresentação das Ferramentas
 
-Para validar a viabilidade e a necessidade do desenvolvimento do _pipeline_ de dados customizado, foram analisadas as principais alternativas tecnológicas e metodológicas disponíveis atualmente para o processo de fechamento e detecção de inconsistências:
+Para validar a viabilidade e a necessidade do desenvolvimento do pipeline de dados customizado, foram analisadas as principais alternativas tecnológicas e metodológicas disponíveis atualmente para o processo de fechamento e detecção de inconsistências:
 
 ### 1.3.1.1. Ferramentas de planilhas eletrônicas
 
@@ -138,9 +138,9 @@ Os pontos fortes e limitações das soluções apresentadas na pesquisa de bench
 
 ### 1.3.3. Diferencial da solução
 
-O diferencial esperado para o projeto proposto está na utilização de uma arquitetura baseada em _Data Lake_ e algoritmos de _Machine Learning_ para detecção automática de anomalias em dados financeiros. Diferente das soluções tradicionais, que dependem de validações manuais, regras fixas e análises visuais, a solução proposta permitirá identificação de padrões atípicos de forma automatizada e escalável, buscando possibilitar a detecção proativa de inconsistências antes que elas impactem o processo de fechamento financeiro. 
+O diferencial esperado para o projeto proposto está na utilização de uma arquitetura baseada em Data Lake e algoritmos de Machine Learning para detecção automática de anomalias em dados financeiros. Diferente das soluções tradicionais, que dependem de validações manuais, regras fixas e análises visuais, a solução proposta permitirá identificação de padrões atípicos de forma automatizada e escalável, buscando possibilitar a detecção proativa de inconsistências antes de qualquer impacto no processo de fechamento financeiro.
 
-Além disso, a solução não é idealizada para substituir o uso dos sistemas existentes mencionados na pesquisa de _benchmark_, mas atuar de forma complementar, integrando dados de diferentes formas e disponibilizando análises avançadas para as equipes de planejamento da organização. 
+Além disso, a solução não é idealizada para substituir o uso dos sistemas existentes mencionados na pesquisa de benchmark, mas para atuação complementar, integrando dados de diferentes formas e disponibilizando análises avançadas para as equipes de planejamento da organização. 
 
 ## 1.4 Público-Alvo
 
@@ -148,15 +148,15 @@ O público-alvo desse projeto é composto por profissionais das áreas financeir
 
 Entre as áreas diretamente envolvidas nesse processo estão as equipes de FP&A (_Financial Planning & Analysis_), controladoria, custos, contabilidade, planejamento e orçamento, projetos de finanças, _commercial finance_, tesouraria, _taxes_, entre outros. Essas equipes utilizarão os dados financeiros disponibilizados pelo sistema para validar indicadores de desempenho, investigar variações nos resultados e garantir a consistência das informações utilizadas na tomada de decisão. 
 
-A interação desse público com o sistema ocorrerá principalmente durante os períodos de fechamento financeiro, momento em que os times realizam verificações adicionais para confirmar a consistência dos números consolidados e investigar possíveis variações relevantes nos resultados. Logo, do ponto de vista técnico, espera-se que os usuários possuam conhecimento intermediário sobre dados financeiros e indicadores de rentabilidade, mas sem a necessidade de experiência avançada em tecnologia ou ciência de dados
+A interação desse público com o sistema ocorrerá principalmente durante os períodos de fechamento financeiro, momento em que os times realizam verificações adicionais para confirmar a consistência dos números consolidados e investigar possíveis variações relevantes nos resultados. Logo, do ponto de vista técnico, espera-se que os usuários possuam conhecimento intermediário sobre dados financeiros e indicadores de rentabilidade, mas sem a necessidade de experiência avançada em tecnologia ou ciência de dados. 
 
-Dessa forma, a atuação desses profissionais se dará por meio da interpretação visual dos _dashboards_ analíticos e alertas automatizados, possibilitando que os usuários traduzam rapidamente os comportamentos atípicos detectados em ações de correção. 
+Dessa forma, a atuação desses profissionais se dará por meio da interpretação visual dos dashboards analíticos e alertas automatizados, possibilitando que os usuários traduzam rapidamente os comportamentos atípicos detectados em ações de correção. 
 
 ## 1.5. Objetivos do Projeto
 
 ### 1.5.1. Objetivos Gerais
 
-Desenvolver uma solução tecnológica automatizada, baseada na arquitetura de _Data Lake_ e modelos de _Machine Learning_, para a detecção preditiva de anomalias em dados financeiros transacionais focados na Margem de Contribuição. A solução busca aumentar a confiabilidade das informações financeiras, reduzir o retrabalho operacional e otimizar o tempo de validação das equipes durante o processo de fechamento contábil e gerencial. 
+Desenvolver uma solução tecnológica automatizada, baseada na arquitetura de Data Lake e modelos de Machine Learning, para a detecção preditiva de anomalias em dados financeiros transacionais focados na Margem de Contribuição. A solução busca aumentar a confiabilidade das informações financeiras, reduzir o retrabalho operacional e otimizar o tempo de validação das equipes durante o processo de fechamento contábil e gerencial. 
 
 ### 1.5.2. Objetivos Específicos
 
@@ -193,16 +193,125 @@ O projeto será avaliado por meio de indicadores que medem tanto o desempenho t�
 
  Esses indicadores permitem avaliar não apenas o desempenho técnico da solução, mas também o seu impacto direto na eficiência do processo de fechamento financeiro e na confiabilidade das informações utilizadas pela organização.
 
- # 2. Engenharia de Requisitos 
+# 2. Engenharia de Requisitos 
+## 2.1. Personas
+
+Para garantir que a solução proposta atenda às necessidades reais dos usuários envolvidos no processo de fechamento e análise financeira, foram definidas três personas representando os principais perfis de usuários impactados pelo sistema:
+
+### 2.2.1 Responsável por atividades de fechamento
+
+Martin Kovak, especialista no time corporativo global de custos do GBS (Global Business Support) da Eslováquia.
+
+Martin é responsável pelo processo de fechamento financeiro mensal de uma das unidades do grupo. Durante o fechamento, ele precisa garantir que todas as receitas, custos fixos e variáveis, e rateios de rentabilidade estejam corretamente refletidos no sistema antes do envio das informações para consolidação corporativa. Ele trabalha com extrações de dados do ERP e planilhas de Excel, realizando o preenchimento manual de KPIs e suas respectivas análises. 
+
+**Atribuições:**
+ - Suportar as plantas da organização nas análises e validações pré e pós fechamento;
+ - Execução dos fechamentos, COPC (Product Cost Controlling) e COPA (Controlling Profitability Analysis);
+ - Preencher manualmente os KPIs corporativos globais de controle de dados;
+ - Garantir a execução das atividades sem inconsistências.
+
+**Principais dificuldades:**
+ - Grande volume de dados para validar manualmente;
+ - Dependência de planilhas e análises manuais;
+ - Dificuldade em identificar pequenos erros em meio a milhões de registros;
+ - Pressão com prazos de execução do fechamento.
+
+Para a correta compreensão das rotinas de auditoria e validação da Margem de Contribuição, é necessário pontuar a diferença entre as duas principais etapas de fechamento no sistema SAP, o COPC (Product Cost Controlling) e o COPA (Controlling Profitability Analysis).
+
+O COPC atua na preparação operacional do sistema, consolidando o custo real dos produtos por meio do encerramento de ordens de produção, ajustes contábeis gerenciais e a execução de jobs que atualizam o Preço Médio Ponderado (MAP) de todos os produtos (DUNCAN, 2014). Com essa base estruturada, o próximo passo é o COPA, assumindo então um foco mais estratégico.
+
+Nessa fase, ocorre o cruzamento estratégico entre custos e receitas, que são distribuídos detalhadamente por cliente, código de material e origem. Ao realizar esse rateio em diferentes dimensões do negócio, a Margem de Contribuição é consolidada com a granularidade ideal para ser integrada à solução proposta. 
+
+### 2.2.2 Analista de Finanças
+
+Fernanda Martins, analista de FP&A (Financial Planning & Analysis) no time corporativo global de finanças.
+
+Fernanda é responsável por analisar os resultados financeiros após o fechamento mensal, avaliando variações de receita, custos e margem de contribuição. Seu trabalho consiste em identificar e explicar desvios em relação ao orçamento, forecast e períodos anteriores, garantindo que os resultados apresentados à diretoria reflitam corretamente a situação financeira da empresa. Para isso, ela utiliza relatórios extraídos do SAP, dashboards em ferramentas de BI e planilhas de Excel para análises complementares e investigações de variações, além de ferramentas como o BW, também nativo do SAP.
+
+**Atribuições:**
+ - Analisar variações dos resultados financeiros após o fechamento;
+ - Identificar e explicar possíveis variações relevantes;
+ - Garantir a confiabilidade dos números apresentados à diretoria;
+ - Produzir relatórios gerenciais e apresentações executivas.
+
+**Principais dificuldades:**
+ - Processo de investigação de inconsistências após a conclusão do fechamento é lento e manual;
+ - Necessidade de cruzar dados de diferentes sistemas e planilhas;
+ - Dependência de análises visuais para identificar possíveis anomalias dos dados;
+ - Grande volume de informações para analisar em um curto período de tempo.
+
+### 2.2.3 Especialista de Projetos de Finanças
+
+Nancy Williams, especialista no time corporativo global de projetos de finanças. 
+
+Nancy atua na área corporativa responsável pela manutenção e evolução dos sistemas financeiros utilizados pela organização, como SAP, SAP BPC, ferramentas de Business Intelligence e automações em planilhas e scripts. Seu trabalho envolve propor melhorias, automatizar processos, padronizar fluxos financeiros em nível global e garantir que as soluções atendam às legislações locais de cada país. Ela também participa de projetos de implementação de SAP em empresas recém adquiridas pelo grupo, garantindo a integração dos dados e a padronização dos processos financeiros. 
+
+**Atribuições:**
+ - Padronizar atividades financeiras em nível global;
+ - Automatizar processos manuais relacionados ao fechamento e análises de resultado;
+ - Integrar dados de diferentes sistemas financeiros;
+ - Garantir conformidade com legislações locais de todas as plantas;
+ - Melhorar a disponibilidade e confiabilidade dos dados para análise.
+
+**Principais dificuldades:**
+- Integração complexa entre diferentes sistemas e bases de dados;
+ - Necessidade constante de desenvolver novas automações para atender demandas do negócio;
+ - Limitações das ferramentas atuais para análises mais avançadas e monitoramento automático de inconsistências.
+
+As personas indicadas representam os principais perfis envolvidos no processo de fechamento e análise financeira dentro da organização, abrangendo respectivamente atividades operacionais, analíticas e estratégicas. Apesar de atuarem em etapas distintas do processo, todas enfrentam dificuldades relacionadas ao grande volume de dados, à dependência de controles manuais e à dificuldade de identificação de inconsistências. 
+
+Além desses perfis, a solução proposta também apoiará equipes locais de finanças, que utilizam os dados para compreender com maior precisão o cenário contábil de suas respectivas unidades, analisar oscilações de desempenho e apoiar decisões relacionadas a critérios de rateio aplicados em processos como o COPA. Dessa forma, amplia-se o alcance da proposta, que passa a atender não apenas demandas corporativas globais, mas também necessidades analíticas e gerenciais em nível local. 
+
+Nesse contexto, com o objetivo de centralizar os dados, padronizar as análises e permitir a identificação proativa de anomalias no tratamento das bases informacionais, o projeto contribuirá para a redução de retrabalho e o aumento da confiabilidade das informações no suporte à tomada de decisão gerencial. 
+
+## 2.2 Casos de Uso Principais
+
+### 2.2.1 Análise de Indicadores Financeiros 
+
+**Atores:** 
+ - Usuário de Finanças Local
+ - Usuário de Finanças Corporativo Global
+
+**Fluxo Principal:**
+ 1. O usuário acessa a plataforma web do Qlik Sense.
+ 2. O usuário fornece as informações necessárias para o login, com o email da organização e a senha cadastrada na criação da conta.
+ 3. O usuário seleciona o dashboard analítico da solução.
+ 4. O sistema apresenta os indicadores financeiros disponíveis.
+ 5. O usuário seleciona nos campos de filtro o período e empresa a serem analisados.
+ 6. O usuário pode selecionar outros filtros relevantes de acordo com a necessidade para cada análise, como produto, centro de custo, cliente, entre outros.
+ 7. O sistema atualiza a visualização conforme os critérios selecionados .
+ 8. O usuário analisa os indicadores e gráficos apresentados.
+
+**Fluxo Alternativo:**
+
+ 2.a. Credenciais inválidas.  
+ 2.a.1. O sistema informa que não foi possível realizar o login com as credenciais fornecidas.  
+ 2.a.2. O fluxo é encerrado.
+
+ 7.a. Não existem dados para os filtros selecionados  
+ 7.a.1. O sistema informa que não há dados disponíveis para os critérios escolhidos.  
+ 7.a.2. O fluxo retorna ao passo 4.
+
+<div align="center">
+
+**Figura 3** – Diagrama de Caso de Uso - Análise de Indicadores Financeiros
+
+<img src="./images/figura3.png" width="70%">  
+
+**Fonte**: Elaborado pela autora, com auxílio da ferramenta Miro (2026).
+
+</div>
 
 
- # 3. Fluxos e Comportamentos do Sistema
- # 4. Mockups e Experiência do Usuário (UX)
- # 5. Arquitetura do Sistema
- # 6. Segurança e privacidade
- # 7. Planejamento do Projeto 
 
- # 8. Referências 
+
+# 3. Fluxos e Comportamentos do Sistema
+# 4. Mockups e Experiência do Usuário (UX)
+# 5. Arquitetura do Sistema
+# 6. Segurança e privacidade
+# 7. Planejamento do Projeto 
+
+# 8. Referências 
 
 - LAUDON, Kenneth C.; LAUDON, Jane P. Sistemas de Informação Gerenciais. 16. ed. Pearson, 2020.
 - HORNGREN, Charles T. et al. Contabilidade Gerencial. Pearson, 2012.
