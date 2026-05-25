@@ -523,19 +523,92 @@ O fluxo de navegação apresenta o caminho principal percorrido pelo usuário de
 
 </div>
 
+## 4.2. Wireframes ou Mockup de Telas 
 
+Os wireframes apresentados a seguir representam a proposta inicial de organização visual dos dashboards da solução. As telas foram desenvolvidas com o apoio da ferramenta Excalidraw, com o objetivo de demonstrar, de forma simplificada, a disposição dos filtros, indicadores, gráficos, 	e áreas de análises que apoiarão os usuários na consulta dos dados financeiros e na investigação das anomalias identificadas pelo sistema. 
 
+<div align="center">
 
+**Figura 10** – Wireframe do dashboard de indicadores financeiros 
 
+<img src="./images/Mockups/Financial_dashboard_mockup_darkmode.png" width="80%">  
 
+**Fonte**: Elaborado pela autora, com auxílio da ferramenta Excalidraw (2026).
 
+</div>
 
+<div align="center">
 
+**Figura 11** – Wireframe do dashboard de anomalias detectadas 
 
+<img src="./images/Mockups/Financial_dashboard_anomaly_mockup.png" width="90%">  
 
-# 3. Fluxos e Comportamentos do Sistema
-# 4. Mockups e Experiência do Usuário (UX)
+**Fonte**: Elaborado pela autora, com auxílio da ferramenta Excalidraw (2026).
+
+</div>
+
+## 4.3. Fluxos de Interação do Usuário 
+
+As imagens a seguir apresentam o fluxo de interação do usuário com dentro da plataforma Qlik Sense, desde a tela de autenticação até o acesso às pastas e dashboards da solução. Esse fluxo demonstra como o usuário navega pelo ambiente, seleciona a aplicação financeira desejada e acessa as visualizações voltadas à análise de indicadores e à identificação de anomalias.
+
+<div align="center">
+
+**Figura 12** – Tela de Login da plataforma Qlik Sense
+
+<img src="./images/Navegacao_telas/qlik_sense_login.png" width="70%">  
+
+**Fonte**: https://www.qlik.com/pt-br/products/qlik-sense
+
+</div>
+
+<div align="center">
+
+**Figura 13** – Área de navegação do Qlik Sense com as pastas e aplicações disponíveis para o usuário. 
+
+<img src="./images/Navegacao_telas/qlik_sense_folders.png" width="70%">  
+
+**Fonte**: https://www.qlik.com/pt-br/products/qlik-sense
+
+</div>
+
+<div align="center">
+
+**Figura 14** – Pasta da aplicação financeira contendo os dashboards da solução
+
+<img src="./images/Navegacao_telas/qlik_sense_finance_folders.png" width="70%">  
+
+**Fonte**: https://www.qlik.com/pt-br/products/qlik-sense
+
+</div>
+
+<div align="center">
+
+**Figura 15** – Tela inicial do dashboard de análise de rentabilidade. 
+
+<img src="./images/Navegacao_telas/qlik_sense_profit_analysis.png" width="70%">  
+
+**Fonte**: https://www.qlik.com/pt-br/products/qlik-sense
+
+</div>
+
+<div align="center">
+
+**Figura 16** – Tela inicial do dashboard de detecção de anomalias. 
+
+<img src="./images/Navegacao_telas/qlik_sense_anomaly_detection.png" width="70%">  
+
+**Fonte**: https://www.qlik.com/pt-br/products/qlik-sense
+
+</div>
+
 # 5. Arquitetura do Sistema
+
+
+
+
+
+
+
 # 6. Segurança e privacidade
 # 7. Planejamento do Projeto 
 
