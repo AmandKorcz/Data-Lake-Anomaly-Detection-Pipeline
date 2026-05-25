@@ -198,7 +198,7 @@ O projeto será avaliado por meio de indicadores que medem tanto o desempenho t�
 
 Para garantir que a solução proposta atenda às necessidades reais dos usuários envolvidos no processo de fechamento e análise financeira, foram definidas três personas representando os principais perfis de usuários impactados pelo sistema:
 
-### 2.2.1 Responsável por atividades de fechamento
+### 2.2.1. Responsável por atividades de fechamento
 
 Martin Kovak, especialista no time corporativo global de custos do GBS (Global Business Support) da Eslováquia.
 
@@ -222,7 +222,7 @@ O COPC atua na preparação operacional do sistema, consolidando o custo real do
 
 Nessa fase, ocorre o cruzamento estratégico entre custos e receitas, que são distribuídos detalhadamente por cliente, código de material e origem. Ao realizar esse rateio em diferentes dimensões do negócio, a Margem de Contribuição é consolidada com a granularidade ideal para ser integrada à solução proposta. 
 
-### 2.2.2 Analista de Finanças
+### 2.2.2. Analista de Finanças
 
 Fernanda Martins, analista de FP&A (Financial Planning & Analysis) no time corporativo global de finanças.
 
@@ -240,7 +240,7 @@ Fernanda é responsável por analisar os resultados financeiros após o fechamen
  - Dependência de análises visuais para identificar possíveis anomalias dos dados;
  - Grande volume de informações para analisar em um curto período de tempo.
 
-### 2.2.3 Especialista de Projetos de Finanças
+### 2.2.3. Especialista de Projetos de Finanças
 
 Nancy Williams, especialista no time corporativo global de projetos de finanças. 
 
@@ -264,9 +264,9 @@ Além desses perfis, a solução proposta também apoiará equipes locais de fin
 
 Nesse contexto, com o objetivo de centralizar os dados, padronizar as análises e permitir a identificação proativa de anomalias no tratamento das bases informacionais, o projeto contribuirá para a redução de retrabalho e o aumento da confiabilidade das informações no suporte à tomada de decisão gerencial. 
 
-## 2.2 Casos de Uso Principais
+## 2.2. Casos de Uso Principais
 
-### 2.2.1 Análise de Indicadores Financeiros 
+### 2.2.1. Análise de Indicadores Financeiros 
 
 **Atores:** 
  - Usuário de Finanças Local
@@ -294,15 +294,132 @@ Nesse contexto, com o objetivo de centralizar os dados, padronizar as análises 
 
 <div align="center">
 
-**Figura 3** – Diagrama de Caso de Uso - Análise de Indicadores Financeiros
+**Figura 4** – Diagrama de Caso de Uso - Análise de Indicadores Financeiros
 
-<img src="./images/figura3.png" width="70%">  
+<img src="./images/Casos_de_uso/CasoDeUso_AnaliseDeIndicadoresFinanceiros.jpg" width="70%">  
 
 **Fonte**: Elaborado pela autora, com auxílio da ferramenta Miro (2026).
 
 </div>
 
+### 2.2.2. Investigação de Anomalia Identificada
 
+**Atores:** 
+ - Usuário de Finanças Local
+ - Usuário de Finanças Corporativo Global
+
+**Fluxo Principal:**
+ 1. O usuário acessa a plataforma web do Qlik Sense.
+ 2. O usuário fornece as informações necessárias para o login, com o email da organização e a senha cadastrada na criação da conta.
+ 3. O usuário seleciona o dashboard analítico da solução.
+ 4. O sistema apresenta os registros gerais das anomalias identificadas.
+ 5. O usuário seleciona nos campos de filtro o período e a empresa a serem analisados.
+ 6. O usuário pode selecionar filtros adicionais de investigação, como nível de risco, indicador, unidade de negócio, entre outros.
+ 7. O sistema atualiza a listagem de anomalias conforme os critérios selecionados.
+ 8. O usuário seleciona uma anomalia específica para análise detalhada.
+ 9. O sistema apresenta as informações de ocorrência, incluindo o indicador afetado, classificação de risco, dimensões relacionadas, data de detecção e dados de apoio à identificação.
+ 10. O usuário analisa a ocorrência para apoiar a identificação da possível causa da inconsistência.
+
+**Fluxo Alternativo:**  
+ 2.a. Credenciais inválidas.  
+ 2.a.1. O sistema informa que não foi possível realizar o login com as credenciais fornecidas.  
+ 2.a.2. O fluxo é encerrado.
+
+ 7.a. Não existem anomalias para o filtro selecionado.   
+ 7.a.1. O sistema informa que não há anomalias para os critérios escolhidos.  
+ 7.a.2. O fluxo retorna para o passo 5. 
+
+ 9.a. O detalhamento da anomalia está inconclusivo.  
+ 9.a.1. O sistema informa que a ocorrência foi identificada, mas que o detalhamento ainda está em processamento/indisponível.   
+ 9.a.2 O fluxo retorna para o passo 8. 
+ 
+<div align="center">
+
+**Figura 5** – Diagrama de Caso de Uso - Investigação de Anomalia Identificada
+
+<img src="./images/Casos_de_uso/CasoDeUso_InvestigacaoDeAnomaliaIdentificada.jpg" width="70%">  
+
+**Fonte**: Elaborado pela autora, com auxílio da ferramenta Miro (2026).
+
+</div>
+
+### 2.2.3. Consultar Histórico de Ocorrências 
+
+**Atores:** 
+ - Usuário de Finanças Local
+ - Usuário de Finanças Corporativo Global
+ - Usuário de Projetos de Finanças 
+
+**Fluxo Principal:**
+ 1. O usuário acessa a plataforma web do Qlik Sense.
+ 2. O usuário fornece as informações necessárias para o login, com o email da organização e a senha cadastrada na criação da conta.
+ 3. O usuário seleciona o dashboard de histórico das anomalias identificadas pela solução.
+ 4. O sistema apresenta a versão consolidada do histórico de ocorrências registradas.
+ 5. O usuário seleciona os filtros desejados para consulta, como período, empresa, status da ocorrência, nível de risco, indicador, entre outros indicadores relevantes.
+ 6. O sistema atualiza a visualização de acordo com os critérios selecionados.
+ 7. O usuário visualiza indicadores históricos de ocorrências, como quantidade de anomalias, status, recorrência e distribuição por nível de risco.
+ 8. O usuário analisa o histórico das ocorrências por meio de tabelas, gráficos, KPIs e demais indicadores consolidados.
+ 9. O usuário pode selecionar uma ocorrência específica para visualizar seu detalhamento.
+ 10. O sistema apresenta as informações detalhadas da ocorrência selecionada, incluindo status, data de identificação, classificação de risco e outras atualizações registradas.
+ 11. O usuário utiliza as informações apresentadas para acompanhar o histórico das ocorrências e apoiar as análises de desempenho do processo. 
+
+**Fluxo Alternativo:**  
+ 2.a. Credenciais inválidas.  
+ 2.a.1. O sistema informa que não foi possível realizar o login com as credenciais fornecidas.  
+ 2.a.2. O fluxo é encerrado
+
+ 6.a. Não existem ocorrências registradas para os filtros selecionados.  
+ 6.a.1. O sistema informa que não há histórico disponível para os critérios selecionados.  
+ 6.a.2. O fluxo retorna ao passo 3.
+
+ 10.a. O detalhamento da anomalia está indisponível.  
+ 10.a.1. O sistema informa que o detalhamento da anomalia está indisponível.  
+ 10.a.2. O fluxo retorna para o passo 9.
+
+<div align="center">
+
+**Figura 6** – Diagrama de Caso de Uso - Consultar Histórico de Anomalias Identificadas
+
+<img src="./images/Casos_de_uso/CasoDeUso_ConsultarHistoricoDeAnomaliasIdentificadas.jpg" width="70%">  
+
+**Fonte**: Elaborado pela autora, com auxílio da ferramenta Miro (2026).
+
+</div>
+
+## 2.3. Requisitos Funciohnais 
+
+Os requisitos funcionais descrevem as funcionalidades que o sistema deve executar, sejam elas ações, serviços ou operações que a solução deva ser capaz de realizar para atender às necessidades dos usuários identificados nas personas e nos casos de uso apresentados anteriormente. No contexto do presente trabalho, esses requisitos estão relacionados à integração e processamento de dados financeiros, detecção de anomalias, geração de alertas e disponibilização das informações para a análise por meio de dashboards e relatórios.
+
+RF01 - O sistema deve integrar dados de diferentes fontes  
+RF02 - O sistema deve processar dados financeiros  
+RF03 - O sistema deve ser capaz de detectar anomalias na base de dados  
+RF04 - O sistema deve gerar alertas automáticos  
+RF05 - O sistema deve disponibilizar dashboards  
+RF06 - O sistema deve permitir análises detalhadas  
+RF07 - O sistema deve permitir a geração de relatórios  
+RF08 - O sistema deve permitir a configuração de parâmetros para análise dos dados  
+RF09 - O sistema deve armazenar o histórico das análises  
+RF10 - O sistema deve permitir consultas por período, empresa, conta contábil, centro de custo, etc.   
+RF11 - O sistema deve permitir conferência das análises realizadas e anomalias identificadas.
+
+## 2.4. Requisitos Não Funcionais 
+
+Além dos requisitos funcionais, o sistema deve atender a requisitos não funcionais, que representam características de qualidade da solução, como desempenho, segurança, confiabilidade, escalabilidade e usabilidade. Esses requisitos descrevem a forma como o sistema deve operar, garantindo que a solução seja eficiente, segura e adequada ao ambiente corporativo no qual será utilizada. 
+
+RNF01 - O sistema deve processar os dados em até ? minutos após sua disponibilização do Data Lake.  
+RNF02 - O sistema deve permanecer acessível e operacional durante a janela oficial de fechamento financeiro mensal da organização, assegurando a consulta aos dashboards, alertas gerados e histórico analítico sem interrupções planejadas nesse período.  
+RNF03 - Manutenções programadas ou atualizações da solução devem ocorrer fora da janela oficial de fechamento financeiro, exceto em situações emergenciais.  
+RNF04 - O sistema deve permitir acesso apenas a usuários autorizados.  
+RNF05 - O sistema deve suportar o upload de milhões de registros.  
+RNF06 - O sistema deve ser escalável em ambiente de nuvem, permitindo aumento da capaciade de processamento conforme a demanda (elasticidade).   
+RNF07 - O sistema deve possuir uma interface de visualização fácil e intuitiva.  
+RNF08 - O sistema deve registrar logs de processamento.
+
+## 2.5. Regras de Negócio 
+
+As regras de negócio definem  as condições, restrições e validações que devem ser observadas pelo sistema, a fim de garantir que os processos e as análises financeiras sejam executados em conformidade com as práticas e diretrizes da organização. No contexto deste projeto, tais regras não se limitam apenas ao tratamento analítico das informações, uma vez que é necessário considerar também a complexidade do ambiente em que esses dados são gerados e consolidados. 
+
+Em organizações que utilizam o SAP como sistema corporativo de controle de recursos, as informações financeiras e gerenciais são originadas em diferentes módulos, que mantêm relações de dependência entre si e complementam estruturas integradas de registro e análise. Essa característica exige que a solução considere não apenas a origem oficial das bases informacionais, mas também a consistência, a rastreabilidade e a coerência entre os dados provenientes de diferentes contextos sistêmicos, como representado no fluxo ilustrado na Figura 7.
 
 
 # 3. Fluxos e Comportamentos do Sistema
