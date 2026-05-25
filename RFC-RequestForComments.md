@@ -421,6 +421,117 @@ As regras de negócio definem  as condições, restrições e validações que d
 
 Em organizações que utilizam o SAP como sistema corporativo de controle de recursos, as informações financeiras e gerenciais são originadas em diferentes módulos, que mantêm relações de dependência entre si e complementam estruturas integradas de registro e análise. Essa característica exige que a solução considere não apenas a origem oficial das bases informacionais, mas também a consistência, a rastreabilidade e a coerência entre os dados provenientes de diferentes contextos sistêmicos, como representado no fluxo ilustrado na Figura 7.
 
+<div align="center">
+
+**Figura 7** – Diagrama para representação das conexões entre diferentes módulos do SAP.
+
+<img src="./images/modulos_SAP.png" width="70%">  
+
+**Fonte**: Prime Institute (2024), disponível em: https://www.primeinstitute.com/preguntas/analise-de-rentabilidade-no-sap-copa-copa-baseada-em-custos-copa-baseada-em-contas-e-analise-de-margem-4311
+
+</div>
+
+Considerando esse contexto de integração e dependência entre módulos, as principais regras de negócio estão relacionadas aos seguintes controles:
+
+**Regras de integração de dados:**
+ - A consolidação de informações financeiras provenientes de diferentes módulos devem respeitar diferenças de estrutura, granularidade e contexto de negócio, garantindo que os indicadores calculados reflitam corretamente a realidade analisada.
+ - Apenas bases oficiais e validadas pela organização devem ser utilizadas no processamento analítico da solução.
+ - Os dados integrados devem preservar sua origem e rastreabilidade ao longo das etapas de carga, tratamento e análise.
+
+**Regras de acesso:**
+ - Apenas usuários autorizados podem acessar o sistema.
+ - O usuário deve visualizar apenas os dados das empresas às quais possui permissão de acesso.
+ - Apenas usuários do corporativo global podem alterar os parâmetros do sistema e as regras de detecção de anomalias.
+
+**Regras de detecção de anomalias:**
+ - Um alerta de anomalia deve ser gerado quando for identificado um comportamento fora do padrão estatístico definido pelo modelo.
+ - O sistema deve permitir a configuração de limites mínimos de variação para geração de alertas.
+ - Os alertas devem ser classificados por nível de risco (baixo, médio e alto).
+
+**Regras de indicadores Financeiros:**
+ - A margem de contribuição deve ser calculada com base na diferença entre o total da receita líquida e os custos variáveis.
+ - O sistema deve permitir a análise dos indicadores por período, empresa, unidade de negócio, produto, centro de custo, entre outros.
+ - Os dados analisados devem ser provenientes dos sistemas oficiais da empresa.
+ - Alterações nos parâmetros do sistema devem ser registradas com o nome de usuário, data e hora.
+
+**Regras de Processamento:**
+ - Os dados financeiros devem ser processados apenas após a carga completa das bases no Data Lake.
+ - O sistema deve manter o histórico das análises e dos alertas gerados para futuras avaliações de auditoria.
+
+## 2.6. Fora do Escopo 
+
+A seguir serão apresentadas as funcionalidades e atividades que não fazem parte do escopo da solução proposta. Essa definição é importante para delimitar o objetivo do projeto, evitando o crescimento descontrolado do escopo e garantindo que o foco da solução permaneça na detecção de anomalias e na análise de indicadores financeiros relacionados à margem de contribuição.
+
+ - O sistema proposto não substituirá o ERP (Enterprise Resource Planning) da empresa.
+ - O sistema proposto não realizará nenhum lançamento contábil ou ajuste.
+ - O sistema proposto não será responsável pela consolidação contábil oficialmente reportada no SAP BPC.
+ - O sistema proposto não substituirá o uso das ferramentas de BI utilizadas para análises financeiras por completo.
+ - O sistema proposto não realizará nenhuma atividade de fechamento financeiro.
+ - O sistema proposto não corrigirá automaticamente nenhum dado financeiro.
+ - O sistema proposto não será responsável pelo planejamento orçamentário (budget e forecast).
+ - O sistema proposto não terá como objetivo construir um novo sistema contábil independente.
+ - O sistema proposto não realizará integração em tempo real com todos os sistemas da empresa.
+ - O sistema proposto não tomará nenhuma decisão automática, apenas gerará alertas e análises.
+
+# Fluxos e Comportamentos do Sistema
+## 3.1. Fluxo Principal do Usuário 
+
+<div align="center">
+
+**Figura 8** – Diagrama de atividade.
+
+<img src="./images/Fluxo_comportamento_sistema.jpg" width="70%">  
+
+**Fonte**: Elaborado pela autora, com auxílio da ferramenta Miro (2026).
+
+</div>
+
+## 3.2. Fluxos Alternativos 
+
+### 3.2.1. Acesso não autorizado 
+O usuário tenta acessar o dashboard, mas não possui permissão de acesso.   
+**Comportamento esperado do sistema:** O sistema informa que o usuário não tem permissão de acesso e encerra o fluxo. 
+
+### 3.2.2. Filtros sem dados disponíveis 
+O usuário seleciona período, empresa ou demais filtros que não retornam nenhum registro. 
+**Comportamento esperado do sistema:** O sistema informa que não há dados disponíveis para os critérios selecionados e permite que o usuário ajuste os filtros.
+
+### 3.2.3. Nenhuma anomalia indentificada
+Os indicadores financeiros são carregados, mas o modelo não identifica nenhuma anomalia.
+**Comportamento esperado do sistema:** O sistema informa ausência de anomalias e permite que o usuário conclua a análise. 
+
+### 3.2.4. Falha ao carregar detalhes da anomalia
+O usuário seleciona a anomalia, mas ocorre falha na consulta dos detalhes.
+**Comportamento esperado do sistema:** O sistema exibe uma mensagem de erro que permite retornar ao dashboard principal com a lista de anomalias.
+
+### 3.2.5. Cancelamento da investigação
+O usuário decide não prosseguir com a análise detalhada de uma anomalia. 
+**Comportamento esperado do sistema:** O sistema permite retornar ao dashboard principal com a lista de anomalias detectadas.
+
+# 4. Mockups e Experiência do Usuário (UX)
+## 4.1. Fluxo de Navegação 
+
+O fluxo de navegação apresenta o caminho principal percorrido pelo usuário dentro da solução, desde o acesso ao Qlik Sense até a consulta dos dashboards financeiros de rentabilidade e de detecção das anomalias. A estrutura foi organizada para permitir que o usuário filtre os dados conforme o contexto da análise a ser realizada, acessando de forma direta os indicadores, detalhes das ocorrências, histórico analítico e opções de exportação.
+
+<div align="center">
+
+**Figura 9** – Diagrama de Fluxo de Navegação da solução proposta
+
+<img src="./images/fluxo_navegacao.jpg" width="50%">  
+
+**Fonte**: Elaborado pela autora, com auxílio da ferramenta Miro (2026).
+
+</div>
+
+
+
+
+
+
+
+
+
+
 
 # 3. Fluxos e Comportamentos do Sistema
 # 4. Mockups e Experiência do Usuário (UX)
