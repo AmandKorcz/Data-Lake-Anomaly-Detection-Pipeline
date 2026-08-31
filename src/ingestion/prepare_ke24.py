@@ -37,28 +37,28 @@ def calculate_file_hash(file_path):
     return sha256.hexdigest()
 
 def normalize_column_name(column_name):
-    #Convertendo os nomes das colunas da base de dados para compatibilidade com Python e BigQuery
+    # Converte os nomes das colunas da base para compatibilidade com Python e BigQuery.
 
     name = str(column_name).strip()
 
-    #Removendo acentuação
+    # Remove acentuação.
     name = unicodedata.normalize("NFKD", name)
     name = name.encode("ascii", "ignore").decode("ascii")
 
-    #Substituindo espaços e caracteres especiais por underline
-    name = re.sub(r"^A-Za-z0-9]+", "_", name)
+    # Substitui espaços e caracteres especiais por underline.
+    name = re.sub(r"[^A-Za-z0-9]+", "_", name)
 
-    #Removendo underline no início/fim e transformando em letras minusculas
+    # Remove underline no início/fim e utiliza letras minúsculas.
     name = name.strip("_").lower()
 
-    #Evitando nomes iniciados por números
+    # Evita nomes iniciados por números.
     if name and name[0].isdigit():
         name = f"c_{name}"
 
     if not name:
-        nome = "column"
+        name = "column"
 
-    return
+    return name
 
 def make_unique(column_names):
     #Garantindo que não existam nomes duplicados após a normalização das colunas
