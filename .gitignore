@@ -1,0 +1,40 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Environment / credentials
+.env
+.env.*
+credentials/
+secrets/
+*.key
+*.pem
+
+# Google Cloud credentials
+service-account*.json
+credentials*.json
+
+# Project data
+data/raw/*
+data/staging/*
+data/processed/*
+data/curated/*
+
+# Keep directory structure
+!data/raw/.gitkeep
+!data/staging/.gitkeep
+!data/processed/.gitkeep
+!data/curated/.gitkeep
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
