@@ -26,6 +26,7 @@ OUTPUT_FILE = (
 METADATA_COLUMNS = [
     "_load_id",
     "_source_file_sha256",
+    "_source_system"
     "_source_file",
     "_source_row_number",
     "_ingested_at_utc"
@@ -73,7 +74,8 @@ def main():
         profile_rows.append({
             "column": column,
             "dtype": str(series.dtype),
-            "row_count": non_null_count,
+            "row_count": len(df),
+            "non_null_count": non_null_count,
             "null_count": null_count,
             "null_percentage": round(
                 null_percentage,
@@ -100,7 +102,7 @@ def main():
     )
 
     print(
-        f"Colunas analisadas: {len(df):,}"
+        f"Colunas analisadas: {len(df.columns):,}"
     )
 
     print("\nTipos encontrados: ")
