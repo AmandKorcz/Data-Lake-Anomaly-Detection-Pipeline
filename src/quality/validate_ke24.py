@@ -168,6 +168,10 @@ def main():
     print("Status: APROVADO\n")
     print(
         f"Schema validado: "
+        f"{schema['expected_column_count']} colunas KE24"
+    )
+    print(
+        f"Metadados validados: "
         f"{len(METADATA_COLUMNS)} campos técnicos"
     )
     print("Nenhuma inconsistência estrutural identificada")
