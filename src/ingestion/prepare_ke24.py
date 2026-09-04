@@ -11,18 +11,27 @@ import pandas as pd
 # ------------------------------------ Configurações do projeto ------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-INPUT_FILE = (
+RAW_DIR = (
     PROJECT_ROOT
     / "data"
     / "raw"
-    / "database_KE24_besco.xlsx"
 )
 
-OUTPUT_DIR = PROJECT_ROOT / "data" / "staging"
+OUTPUT_DIR = (
+    PROJECT_ROOT
+    / "data"
+    / "staging"
+)
 
-OUTPUT_FILE = OUTPUT_DIR / "ke24_staging.parquet"
+CONSOLIDATED_OUTPUT_FILE = (
+    OUTPUT_DIR
+    / "ke24_staging.parquet"
+)
 
-COLUMN_MAPPING_FILE = OUTPUT_DIR / "ke24_column_mapping.csv"
+COLUMN_MAPPING_FILE = (
+    OUTPUT_DIR
+    / "ke24_column_mapping.csv"
+)
 
 # ------------------------------------ Funções Auxiliares ------------------------------------
 def calculate_file_hash(file_path):
@@ -77,55 +86,33 @@ def make_unique(column_names):
             )
     return unique_names
 
+def process_ke24_file(input_file, expected_columns=None):
+    print("\n")
+    print(f"Processando arquivo: {input_file.name}")
+    print("\n")
 
-# ------------------------------------ Pipeline de Ingestão ------------------------------------
-
-def main():
-
-    print(" ")
-    print("KE24 - Pipeline de Ingestão")
-    print(" ")
-
-    #Vaidação do arquivo
-    if not INPUT_FILE.exists():
-        raise FileNotFoundError(
-            f"Arquivo não encontrado: {INPUT_FILE}"
-        )
-
-    OUTPUT_DIR.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-    print(f"\nArquivo de origem: {INPUT_FILE.name}")
-
-    #Identificação da carga
+    #Identifiaação individual da carga
     load_id = str(uuid.uuid4())
-
     ingestion_timestamp = datetime.now(timezone.utc)
-
-    source_hash = calculate_file_hash(INPUT_FILE)
+    source_hash = calculate_file_hash(input_file)
 
     print(f"LOAD ID: {load_id}")
     print(f"SHA-256: {source_hash}")
 
-    #Leitura da KE24
-    print("\nLendo a base de dados...")
-
-    df = pd.read_excel(INPUT_FILE)
+    #Leitura do Excel 
+    df = pd.read_excel(input_file)
 
     if df.empty:
         raise ValueError(
-            "A base de dados está vaziia"
+            f"O arquivo '{input_file.name} está vazio"
         )
 
     source_row_count = len(df)
     source_column_count = len(df.columns)
 
-    print(f"Linhas encontradas: {source_row_count:,}")
+    print(f"Linhas encontradoas: {source_row_count:,}")
     print(f"Colunas encontradas: {source_column_count:,}")
 
-    #Preserva e normaliza as colunas
     original_columns = list(df.columns)
 
     normalized_columns = [
@@ -137,25 +124,54 @@ def main():
         normalized_columns
     )
 
+    if expected_columns is not None:
+
+        missing_columns = [
+            column
+            for column in expected_columns
+            if column not in normalized_columns
+        ]
+
+        unexpected_columns = [
+            column 
+            for column in normalized_columns
+            if column not in expected_columns
+        ]
+
+        if missing_columns or unexpected_columns:
+            error_message = (
+                f"O arquivo '{input_file.name}' possui um layout diferente dos demais arquivos"
+            )
+
+            if missing_columns:
+                error_message += (
+                    "\n Colunas ausentes: "
+                    + ", ".join(missing_columns)
+                )
+
+            if unexpected_columns:
+                error_message += (
+                    "\nColunas inesperadas: "
+                    + ", ".join(unexpected_columns)
+                )
+
+            raise ValueError(error_message)
+
+    #Mapeamento original -> técnico
     mapping = pd.DataFrame({
+        "source_file": input_file.name * len(original_columns),
         "source_column": original_columns,
         "technical_column": normalized_columns
     })
 
-    mapping.to_csv(
-        COLUMN_MAPPING_FILE,
-        index=False,
-        encoding="utf-8-sig"
-    )
-
     df.columns = normalized_columns
 
-    #Metadados de rastreabilidade
+    #Masterdados de rastreabilidade
     metadata = pd.DataFrame({
         "_load_id": [load_id] * len(df),
         "_source_file_sha256": [source_hash] * len(df),
         "_source_system": ["SAP_KE24"] * len(df),
-        "_source_file": [INPUT_FILE.name] * len(df),
+        "_source_file": [input_file.name] * len(df),
         "_source_row_number": range(2, len(df) + 2),
         "_ingested_at_utc": [ingestion_timestamp] * len(df)
     })
@@ -165,42 +181,175 @@ def main():
             metadata.reset_index(drop=True),
             df.reset_index(drop=True)
         ],
-        axis = 1
+        axis=1
     )
 
-    #Validações técnicas
+    # Validação técnica
     if df.columns.duplicated().any():
         raise ValueError(
-            "Existem nomes de colunas duplicados"
+            f"O arquivo '{input_file.name}' gerou "
+            "nomes de colunas duplicados."
         )
 
-    #Esse é apenas um aviso, registros com dimensões semelhantes podem representar movimetações financeiras diferentes, por isso não farei nenhuma remoção
+    return (
+        df,
+        mapping,
+        normalized_columns,
+        source_row_count
+    )
 
-    #Geração do Parquet
-    df.to_parquet(
-        OUTPUT_FILE,
+
+# ------------------------------------ Pipeline de Ingestão ------------------------------------
+
+def main():
+
+    print(" ")
+    print("KE24 - Pipeline de Ingestão")
+    print(" ")
+
+    #Vaidação da pasta raw
+    if not RAW_DIR.exists():
+        raise FileNotFoundError(
+            f"Pasta RAW não encontrada: {RAW_DIR}"
+        )
+
+    #Localiza os arquivos de excel e ignora os arquivos temporários
+    input_files = sorted([
+        file
+        for file in RAW_DIR.iterdir()
+        if file.is_file()
+        and file.suffix.lower() == ".xlsx"
+        and not file.name.startswith("~$")
+    ])
+
+    if not input_files:
+        raise FileNotFoundError(
+            f"Nenhum arquivo .xlsx encontrado em {RAW_DIR}"
+        )
+
+    OUTPUT_DIR.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    print(
+        f"\nArquivos encontrados: {len(input_files)}"
+    )
+
+    for file in input_files:
+        print(f"- {file.name}")
+
+    dataframes = []
+    mappings = []
+
+    expected_columns = None
+    total_source_rows = 0
+
+    #Processando cada extração individualmente
+    for input_file in input_files:
+
+        (
+            df, 
+            mapping,
+            normalized_columns,
+            source_row_count
+        ) = process_ke24_file(
+            input_file,
+            expected_columns
+        )
+
+    #O primeiro arquivo define o layout esperado da execução
+        if expected_columns is None:
+            expected_columns = normalized_columns
+
+            total_source_rows += source_row_count
+
+            dataframes.append(df)
+            mappings.append(mapping)
+
+            #Gera um .parquet para carga
+            individual_output_file = (
+                OUTPUT_DIR
+                / f"{input_file.stem}_staging.parquet"
+            )
+
+            df.to_parquet(
+                individual_output_file,
+                index=False
+            )
+
+            print(
+                f"Parquet individual: "
+                f"{individual_output_file.name}"
+            )
+
+    #Consolida todas as cargas
+    consolidated_df = pd.concat(
+        dataframes,
+        ignore_index=True
+    )
+
+    consolidated_df.to_parquet(
+        CONSOLIDATED_OUTPUT_FILE,
         index=False
     )
 
+    #Consolidando os mapeamentos de colunas 
+    consolidated_mappings = pd.concat(
+        mappings,
+        ignore_index=True
+    )
+
+    consolidated_mappings.to_csv(
+        COLUMN_MAPPING_FILE,
+        index=False,
+        encoding="utf-8-sig"
+    )
+
     #Resultado
-    print("\n")
-    print("Ingestão Concluída com Sucesso!")
-    print(" ")
+    print()
+    print("\nIngestão concluída com sucesso!\n")
 
-    print(f"\nRegistros de origem: {source_row_count:,}")
-    print(f"Registros no staging: {len(df):,}")
+    print(
+        f"\nArquivos processados: "
+        f"{len(input_files)}"
+    )
 
-    print(f"Colunas de origem: {source_column_count:,}")
+    print(
+        f"Registros de origem: "
+        f"{total_source_rows:,}"
+    )
 
-    print(f"Colunas no staging: {len(df.columns):,}")
+    print(
+        f"Registros consolidados: "
+        f"{len(consolidated_df):,}"
+    )
 
-    print(f"\nParquet:")
-    print(OUTPUT_FILE)
+    print(
+        f"Cargas identificadas: "
+        f"{consolidated_df['_load_id'].nunique()}"
+    )
 
-    print(f"\nMapa de Colunas:")
+    print(
+        f"Empresas identificadas: "
+        f"{consolidated_df['company_code'].nunique()}"
+    )
+
+    print(
+        f"Colunas KE24: "
+        f"{len(expected_columns)}"
+    )
+
+    print(
+        f"Colunas totais no staging: "
+        f"{len(consolidated_df.columns)}"
+    )
+
+    print("\nParquet consolidado: ")
+    print(CONSOLIDATED_OUTPUT_FILE)
+
+    print("\nMapa de colunas:")
     print(COLUMN_MAPPING_FILE)
-
-
 
 if __name__ == "__main__":
     main()
