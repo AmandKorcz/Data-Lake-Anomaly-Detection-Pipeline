@@ -86,6 +86,77 @@ def make_unique(column_names):
             )
     return unique_names
 
+def standardize_ke24_types(df):
+    #Padroniza os tipos de colunas antes de consolidar os arquivos.
+
+    #Dimensões e identificadores são tratados como texto
+    #'period' é tratado como inteiro
+    #'period_year' é tratado como identificador temporal textual
+    #As demais medidas financeiras continuam numéricas
+
+    if "sales_quantity" not in df.columns:
+        raise ValueError(
+            "Coluna 'sales_quantity' não encontrada. Não foi possível identificar o início das medidas financeiras."
+        )
+
+    measure_start_index = df.columns.get_loc(
+        "sales_quantity"
+    )
+
+    dimension_columns = list(
+        df.columns[:measure_start_index]
+    )
+
+    integer_dimension_columns= {
+        "period"
+    }
+
+    #Dimensões
+    for column in dimension_columns:
+        if column in integer_dimension_columns:
+
+            numeric_values = pd.to_numeric(
+                df[column],
+                errors="coerce"
+            )
+
+            invalid_values = (
+                df[column].notna()
+                & numeric_values.isna()
+            )
+
+            if invalid_values.any():
+                raise ValueError(
+                    f"A coluna '{column}' possui valores que não podem ser convertidos para número."
+                )
+
+            decimal_values = (
+                numeric_values
+                .dropna()
+                .mod(1)
+                .ne(0)
+            )
+
+            if decimal_values.any():
+                raise ValueError(
+                    f"A coluna '{column}' possui valores decimais onde eram esperados valores inteiros"
+                )
+
+            df[column] = numeric_values.astype(
+                "Int64"
+            )
+
+        else:
+
+            #Códigos e identificadores devem ser considerados como texto
+            df[column] = (
+                df[column]
+                .astype("string")
+                .str.strip()
+            )
+            
+    return df
+
 def process_ke24_file(input_file, expected_columns=None):
     print("\n")
     print(f"Processando arquivo: {input_file.name}")
@@ -159,12 +230,14 @@ def process_ke24_file(input_file, expected_columns=None):
 
     #Mapeamento original -> técnico
     mapping = pd.DataFrame({
-        "source_file": input_file.name * len(original_columns),
+        "source_file": [input_file.name] * len(original_columns),
         "source_column": original_columns,
         "technical_column": normalized_columns
     })
 
     df.columns = normalized_columns
+
+    df = standardize_ke24_types(df)
 
     #Masterdados de rastreabilidade
     metadata = pd.DataFrame({
@@ -200,7 +273,6 @@ def process_ke24_file(input_file, expected_columns=None):
 
 
 # ------------------------------------ Pipeline de Ingestão ------------------------------------
-
 def main():
 
     print(" ")
@@ -258,30 +330,30 @@ def main():
             expected_columns
         )
 
-    #O primeiro arquivo define o layout esperado da execução
+        #O primeiro arquivo define o layout esperado da execução
         if expected_columns is None:
             expected_columns = normalized_columns
 
-            total_source_rows += source_row_count
+        total_source_rows += source_row_count
 
-            dataframes.append(df)
-            mappings.append(mapping)
+        dataframes.append(df)
+        mappings.append(mapping)
 
-            #Gera um .parquet para carga
-            individual_output_file = (
-                OUTPUT_DIR
-                / f"{input_file.stem}_staging.parquet"
-            )
+        #Gera um .parquet para carga
+        individual_output_file = (
+            OUTPUT_DIR
+            / f"{input_file.stem}_staging.parquet"
+        )
 
-            df.to_parquet(
-                individual_output_file,
-                index=False
-            )
+        df.to_parquet(
+            individual_output_file,
+            index=False
+        )
 
-            print(
-                f"Parquet individual: "
-                f"{individual_output_file.name}"
-            )
+        print(
+            f"Parquet individual: "
+            f"{individual_output_file.name}"
+        )
 
     #Consolida todas as cargas
     consolidated_df = pd.concat(

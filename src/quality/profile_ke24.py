@@ -26,7 +26,7 @@ OUTPUT_FILE = (
 METADATA_COLUMNS = [
     "_load_id",
     "_source_file_sha256",
-    "_source_system"
+    "_source_system",
     "_source_file",
     "_source_row_number",
     "_ingested_at_utc"
