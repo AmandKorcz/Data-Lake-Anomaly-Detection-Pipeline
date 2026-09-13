@@ -1,0 +1,19 @@
+{
+    "rules_name": "SAP_KE24_DATA_QUALITY",
+    "rules_version": "1.0",
+
+    "required_not_null": [
+        "currency",
+        "period",
+        "period_year",
+        "company_code"
+    ],
+
+    "integer_like_columns": [
+        "period"
+    ],
+
+    "numeric_measure_start_column": "sales_quantity"
+}
+
+

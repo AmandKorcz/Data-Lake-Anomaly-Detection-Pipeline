@@ -11,18 +11,27 @@ import pandas as pd
 # ------------------------------------ Configurações do projeto ------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-INPUT_FILE = (
+RAW_DIR = (
     PROJECT_ROOT
     / "data"
     / "raw"
-    / "database_KE24_besco.xlsx"
 )
 
-OUTPUT_DIR = PROJECT_ROOT / "data" / "staging"
+OUTPUT_DIR = (
+    PROJECT_ROOT
+    / "data"
+    / "staging"
+)
 
-OUTPUT_FILE = OUTPUT_DIR / "ke24_staging.parquet"
+CONSOLIDATED_OUTPUT_FILE = (
+    OUTPUT_DIR
+    / "ke24_staging.parquet"
+)
 
-COLUMN_MAPPING_FILE = OUTPUT_DIR / "ke24_column_mapping.csv"
+COLUMN_MAPPING_FILE = (
+    OUTPUT_DIR
+    / "ke24_column_mapping.csv"
+)
 
 # ------------------------------------ Funções Auxiliares ------------------------------------
 def calculate_file_hash(file_path):
@@ -37,28 +46,28 @@ def calculate_file_hash(file_path):
     return sha256.hexdigest()
 
 def normalize_column_name(column_name):
-    #Convertendo os nomes das colunas da base de dados para compatibilidade com Python e BigQuery
+    # Converte os nomes das colunas da base para compatibilidade com Python e BigQuery.
 
     name = str(column_name).strip()
 
-    #Removendo acentuação
+    # Remove acentuação.
     name = unicodedata.normalize("NFKD", name)
     name = name.encode("ascii", "ignore").decode("ascii")
 
-    #Substituindo espaços e caracteres especiais por underline
-    name = re.sub(r"^A-Za-z0-9]+", "_", name)
+    # Substitui espaços e caracteres especiais por underline.
+    name = re.sub(r"[^A-Za-z0-9]+", "_", name)
 
-    #Removendo underline no início/fim e transformando em letras minusculas
+    # Remove underline no início/fim e utiliza letras minúsculas.
     name = name.strip("_").lower()
 
-    #Evitando nomes iniciados por números
+    # Evita nomes iniciados por números.
     if name and name[0].isdigit():
         name = f"c_{name}"
 
     if not name:
-        nome = "column"
+        name = "column"
 
-    return
+    return name
 
 def make_unique(column_names):
     #Garantindo que não existam nomes duplicados após a normalização das colunas
@@ -77,55 +86,173 @@ def make_unique(column_names):
             )
     return unique_names
 
+#Remoção das duas linhas de total que vem em todas as extrações da KE24
+def remove_summary_rows(df, input_file_name):
+    required_columns = [
+        "period",
+        "period_year"
+    ]
 
-# ------------------------------------ Pipeline de Ingestão ------------------------------------
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in df.columns
+    ]
 
-def main():
-
-    print(" ")
-    print("KE24 - Pipeline de Ingestão")
-    print(" ")
-
-    #Vaidação do arquivo
-    if not INPUT_FILE.exists():
-        raise FileNotFoundError(
-            f"Arquivo não encontrado: {INPUT_FILE}"
+    if missing_columns:
+        raise ValueError(
+            f"Não foi possível identificar as linhas de total do arquivo '{input_file_name}'."
+            f"Colunas necessárias ausentes: "
+            + ", ".join(missing_columns)
         )
 
-    OUTPUT_DIR.mkdir(
-        parents=True,
-        exist_ok=True
+    period_blank = (
+        df["period"].isna() | df["period"]
+        .astype("string")
+        .str.strip()
+        .eq("")
+        .fillna(False)
     )
 
-    print(f"\nArquivo de origem: {INPUT_FILE.name}")
+    period_year_blank = (
+        df["period_year"].isna() | df["period_year"]
+        .astype("string")
+        .str.strip()
+        .eq("")
+        .fillna(False)
+    )
 
-    #Identificação da carga
+    summary_mask = (
+        period_blank & period_year_blank
+    )
+
+    summary_indices = df.index[summary_mask].tolist()
+
+    #Se nenhuama linha de total for encontrada
+    if not summary_indices:
+        return df, 0
+
+    #Garantindo que as linhas encontradas estejam somente no final da extração
+    first_summary_index = summary_indices[0]
+
+    expected_tail_indices = list(
+        range( first_summary_index, len(df))
+    )
+
+    if summary_indices != expected_tail_indices:
+        raise ValueError(
+            f"O arquivo '{input_file_name}' possui registros sem período no meio da base"
+            f"Esses registros não serão removidos automaticamente"
+        )
+
+    removed_count = len(
+        summary_indices
+    )
+
+    df = df.loc[
+        ~summary_mask
+    ].copy()
+
+    return df, removed_count
+
+def standardize_ke24_types(df):
+    #Padroniza os tipos de colunas antes de consolidar os arquivos.
+
+    #Dimensões e identificadores são tratados como texto
+    #'period' é tratado como inteiro
+    #'period_year' é tratado como identificador temporal textual
+    #As demais medidas financeiras continuam numéricas
+
+    if "sales_quantity" not in df.columns:
+        raise ValueError(
+            "Coluna 'sales_quantity' não encontrada. Não foi possível identificar o início das medidas financeiras."
+        )
+
+    measure_start_index = df.columns.get_loc(
+        "sales_quantity"
+    )
+
+    dimension_columns = list(
+        df.columns[:measure_start_index]
+    )
+
+    integer_dimension_columns= {
+        "period"
+    }
+
+    #Dimensões
+    for column in dimension_columns:
+        if column in integer_dimension_columns:
+
+            numeric_values = pd.to_numeric(
+                df[column],
+                errors="coerce"
+            )
+
+            invalid_values = (
+                df[column].notna()
+                & numeric_values.isna()
+            )
+
+            if invalid_values.any():
+                raise ValueError(
+                    f"A coluna '{column}' possui valores que não podem ser convertidos para número."
+                )
+
+            decimal_values = (
+                numeric_values
+                .dropna()
+                .mod(1)
+                .ne(0)
+            )
+
+            if decimal_values.any():
+                raise ValueError(
+                    f"A coluna '{column}' possui valores decimais onde eram esperados valores inteiros"
+                )
+
+            df[column] = numeric_values.astype(
+                "Int64"
+            )
+
+        else:
+
+            #Códigos e identificadores devem ser considerados como texto
+            df[column] = (
+                df[column]
+                .astype("string")
+                .str.strip()
+            )
+            
+    return df
+
+def process_ke24_file(input_file, expected_columns=None):
+    print("\n")
+    print(f"Processando arquivo: {input_file.name}")
+    print("\n")
+
+    #Identifiaação individual da carga
     load_id = str(uuid.uuid4())
-
     ingestion_timestamp = datetime.now(timezone.utc)
-
-    source_hash = calculate_file_hash(INPUT_FILE)
+    source_hash = calculate_file_hash(input_file)
 
     print(f"LOAD ID: {load_id}")
     print(f"SHA-256: {source_hash}")
 
-    #Leitura da KE24
-    print("\nLendo a base de dados...")
-
-    df = pd.read_excel(INPUT_FILE)
+    #Leitura do Excel 
+    df = pd.read_excel(input_file)
 
     if df.empty:
         raise ValueError(
-            "A base de dados está vaziia"
+            f"O arquivo '{input_file.name} está vazio"
         )
 
     source_row_count = len(df)
     source_column_count = len(df.columns)
 
-    print(f"Linhas encontradas: {source_row_count:,}")
+    print(f"Linhas encontradoas: {source_row_count:,}")
     print(f"Colunas encontradas: {source_column_count:,}")
 
-    #Preserva e normaliza as colunas
     original_columns = list(df.columns)
 
     normalized_columns = [
@@ -137,25 +264,64 @@ def main():
         normalized_columns
     )
 
+    if expected_columns is not None:
+
+        missing_columns = [
+            column
+            for column in expected_columns
+            if column not in normalized_columns
+        ]
+
+        unexpected_columns = [
+            column 
+            for column in normalized_columns
+            if column not in expected_columns
+        ]
+
+        if missing_columns or unexpected_columns:
+            error_message = (
+                f"O arquivo '{input_file.name}' possui um layout diferente dos demais arquivos"
+            )
+
+            if missing_columns:
+                error_message += (
+                    "\n Colunas ausentes: "
+                    + ", ".join(missing_columns)
+                )
+
+            if unexpected_columns:
+                error_message += (
+                    "\nColunas inesperadas: "
+                    + ", ".join(unexpected_columns)
+                )
+
+            raise ValueError(error_message)
+
+    #Mapeamento original -> técnico
     mapping = pd.DataFrame({
+        "source_file": [input_file.name] * len(original_columns),
         "source_column": original_columns,
         "technical_column": normalized_columns
     })
 
-    mapping.to_csv(
-        COLUMN_MAPPING_FILE,
-        index=False,
-        encoding="utf-8-sig"
-    )
-
     df.columns = normalized_columns
 
-    #Metadados de rastreabilidade
+    df, summary_rows_removed = remove_summary_rows(
+        df, input_file.name
+    )
+
+    print(
+        f"Linhas de totais removidas: {summary_rows_removed}"
+    )
+
+    df = standardize_ke24_types(df)
+
+    #Masterdados de rastreabilidade
     metadata = pd.DataFrame({
         "_load_id": [load_id] * len(df),
         "_source_file_sha256": [source_hash] * len(df),
         "_source_system": ["SAP_KE24"] * len(df),
-        "_source_file": [INPUT_FILE.name] * len(df),
+        "_source_file": [input_file.name] * len(df),
         "_source_row_number": range(2, len(df) + 2),
         "_ingested_at_utc": [ingestion_timestamp] * len(df)
     })
@@ -165,42 +331,174 @@ def main():
             metadata.reset_index(drop=True),
             df.reset_index(drop=True)
         ],
-        axis = 1
+        axis=1
     )
 
-    #Validações técnicas
+    # Validação técnica
     if df.columns.duplicated().any():
         raise ValueError(
-            "Existem nomes de colunas duplicados"
+            f"O arquivo '{input_file.name}' gerou "
+            "nomes de colunas duplicados."
         )
 
-    #Esse é apenas um aviso, registros com dimensões semelhantes podem representar movimetações financeiras diferentes, por isso não farei nenhuma remoção
+    return (
+        df,
+        mapping,
+        normalized_columns,
+        source_row_count
+    )
 
-    #Geração do Parquet
-    df.to_parquet(
-        OUTPUT_FILE,
+
+# ------------------------------------ Pipeline de Ingestão ------------------------------------
+def main():
+
+    print(" ")
+    print("KE24 - Pipeline de Ingestão")
+    print(" ")
+
+    #Vaidação da pasta raw
+    if not RAW_DIR.exists():
+        raise FileNotFoundError(
+            f"Pasta RAW não encontrada: {RAW_DIR}"
+        )
+
+    #Localiza os arquivos de excel e ignora os arquivos temporários
+    input_files = sorted([
+        file
+        for file in RAW_DIR.iterdir()
+        if file.is_file()
+        and file.suffix.lower() == ".xlsx"
+        and not file.name.startswith("~$")
+    ])
+
+    if not input_files:
+        raise FileNotFoundError(
+            f"Nenhum arquivo .xlsx encontrado em {RAW_DIR}"
+        )
+
+    OUTPUT_DIR.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    print(
+        f"\nArquivos encontrados: {len(input_files)}"
+    )
+
+    for file in input_files:
+        print(f"- {file.name}")
+
+    dataframes = []
+    mappings = []
+
+    expected_columns = None
+    total_source_rows = 0
+
+    #Processando cada extração individualmente
+    for input_file in input_files:
+
+        (
+            df, 
+            mapping,
+            normalized_columns,
+            source_row_count
+        ) = process_ke24_file(
+            input_file,
+            expected_columns
+        )
+
+        #O primeiro arquivo define o layout esperado da execução
+        if expected_columns is None:
+            expected_columns = normalized_columns
+
+        total_source_rows += source_row_count
+
+        dataframes.append(df)
+        mappings.append(mapping)
+
+        #Gera um .parquet para carga
+        individual_output_file = (
+            OUTPUT_DIR
+            / f"{input_file.stem}_staging.parquet"
+        )
+
+        df.to_parquet(
+            individual_output_file,
+            index=False
+        )
+
+        print(
+            f"Parquet individual: "
+            f"{individual_output_file.name}"
+        )
+
+    #Consolida todas as cargas
+    consolidated_df = pd.concat(
+        dataframes,
+        ignore_index=True
+    )
+
+    consolidated_df.to_parquet(
+        CONSOLIDATED_OUTPUT_FILE,
         index=False
     )
 
+    #Consolidando os mapeamentos de colunas 
+    consolidated_mappings = pd.concat(
+        mappings,
+        ignore_index=True
+    )
+
+    consolidated_mappings.to_csv(
+        COLUMN_MAPPING_FILE,
+        index=False,
+        encoding="utf-8-sig"
+    )
+
     #Resultado
-    print("\n")
-    print("Ingestão Concluída com Sucesso!")
-    print(" ")
+    print()
+    print("\nIngestão concluída com sucesso!\n")
 
-    print(f"\nRegistros de origem: {source_row_count:,}")
-    print(f"Registros no staging: {len(df):,}")
+    print(
+        f"\nArquivos processados: "
+        f"{len(input_files)}"
+    )
 
-    print(f"Colunas de origem: {source_column_count:,}")
+    print(
+        f"Registros de origem: "
+        f"{total_source_rows:,}"
+    )
 
-    print(f"Colunas no staging: {len(df.columns):,}")
+    print(
+        f"Registros consolidados: "
+        f"{len(consolidated_df):,}"
+    )
 
-    print(f"\nParquet:")
-    print(OUTPUT_FILE)
+    print(
+        f"Cargas identificadas: "
+        f"{consolidated_df['_load_id'].nunique()}"
+    )
 
-    print(f"\nMapa de Colunas:")
+    print(
+        f"Empresas identificadas: "
+        f"{consolidated_df['company_code'].nunique()}"
+    )
+
+    print(
+        f"Colunas KE24: "
+        f"{len(expected_columns)}"
+    )
+
+    print(
+        f"Colunas totais no staging: "
+        f"{len(consolidated_df.columns)}"
+    )
+
+    print("\nParquet consolidado: ")
+    print(CONSOLIDATED_OUTPUT_FILE)
+
+    print("\nMapa de colunas:")
     print(COLUMN_MAPPING_FILE)
-
-
 
 if __name__ == "__main__":
     main()
