@@ -86,6 +86,75 @@ def make_unique(column_names):
             )
     return unique_names
 
+#Remoção das duas linhas de total que vem em todas as extrações da KE24
+def remove_summary_rows(df, input_file_name):
+    required_columns = [
+        "period",
+        "period_year"
+    ]
+
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in df.columns
+    ]
+
+    if missing_columns:
+        raise ValueError(
+            f"Não foi possível identificar as linhas de total do arquivo '{input_file_name}'."
+            f"Colunas necessárias ausentes: "
+            + ", ".join(missing_columns)
+        )
+
+    period_blank = (
+        df["period"].isna() | df["period"]
+        .astype("string")
+        .str.strip()
+        .eq("")
+        .fillna(False)
+    )
+
+    period_year_blank = (
+        df["period_year"].isna() | df["period_year"]
+        .astype("string")
+        .str.strip()
+        .eq("")
+        .fillna(False)
+    )
+
+    summary_mask = (
+        period_blank & period_year_blank
+    )
+
+    summary_indices = df.index[summary_mask].tolist()
+
+    #Se nenhuama linha de total for encontrada
+    if not summary_indices:
+        return df, 0
+
+    #Garantindo que as linhas encontradas estejam somente no final da extração
+    first_summary_index = summary_indices[0]
+
+    expected_tail_indices = list(
+        range( first_summary_index, len(df))
+    )
+
+    if summary_indices != expected_tail_indices:
+        raise ValueError(
+            f"O arquivo '{input_file_name}' possui registros sem período no meio da base"
+            f"Esses registros não serão removidos automaticamente"
+        )
+
+    removed_count = len(
+        summary_indices
+    )
+
+    df = df.loc[
+        ~summary_mask
+    ].copy()
+
+    return df, removed_count
+
 def standardize_ke24_types(df):
     #Padroniza os tipos de colunas antes de consolidar os arquivos.
 
@@ -236,6 +305,14 @@ def process_ke24_file(input_file, expected_columns=None):
     })
 
     df.columns = normalized_columns
+
+    df, summary_rows_removed = remove_summary_rows(
+        df, input_file.name
+    )
+
+    print(
+        f"Linhas de totais removidas: {summary_rows_removed}"
+    )
 
     df = standardize_ke24_types(df)
 

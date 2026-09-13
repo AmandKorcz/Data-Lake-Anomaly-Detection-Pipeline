@@ -89,7 +89,7 @@ def main():
             )
 
             non_null_count = int(
-                series.isna().sum()
+                series.notna().sum()
             )
 
             null_percentage = (
@@ -139,7 +139,7 @@ def main():
     )
 
     print(
-        f"Cargas analisadas: "
+        f"Arquivos analisados: "
         f"{df['_load_id'].nunique()}"
     )
 

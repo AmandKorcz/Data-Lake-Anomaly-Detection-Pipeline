@@ -20,6 +20,12 @@ SCHEMA_FILE = (
     / "ke24_schema.json"
 )
 
+QUALITY_RULES_FILE = (
+    PROJECT_ROOT
+    / "config"
+    / "ke24_quality_rules.json"
+)
+
 METADATA_COLUMNS = [
     "_load_id",
     "_source_file_sha256",
@@ -121,6 +127,140 @@ def validate_metadata(df):
 
     return errors
 
+def load_quality_rules():
+    if not QUALITY_RULES_FILE.exists():
+        raise FileNotFoundError(
+            f"Regras de qualidade para validação não encontradas: "
+            f"{QUALITY_RULES_FILE}"
+        )
+
+    with open(
+        QUALITY_RULES_FILE,
+        "r",
+        encoding="utf-8"
+    ) as file:
+        return json.load(file)
+
+#Validaçaõ de campos essenciais
+def validate_required_fields(df, rules):
+
+    errors = []
+
+    for column in rules["required_not_null"]:
+        #Verifica se a coluna existe
+        if column not in df.columns:
+            errors.append(
+                f"Campos obrigatórios não encontrados: "
+                f"'{column}'"
+            )
+            continue
+
+        #Verifica valores nulos
+        invalid_values = df[column].isna()
+
+        #Também considera texto vazio como inválido
+        if pd.api.types.is_string_dtype(df[column].dtype):
+            invalid_values = (
+                invalid_values
+                | df[column].astype("string").str.strip().eq("")
+            )
+
+        invalid_count = invalid_values.sum()
+
+        if invalid_count > 0:
+            errors.append(
+                f"O campo obrigatório '{column}' possui {invalid_count} valores vazios ou nulos"
+            )
+
+    return errors
+
+#Vaidaçaõ de campos semanticamente inteiros
+def validate_integer_like_columns(df, rules):
+
+    errors = []
+
+    for column in rules["integer_like_columns"]:
+
+        if column not in df.columns:
+            continue
+
+        numeric_values = pd.to_numeric(
+            df[column],
+            errors="coerce"
+        )
+
+        invalid_numeric = (
+            df[column].notna()
+            & numeric_values.isna()
+        )
+
+        if invalid_numeric.any():
+            errors.append(
+                f"O campo '{column}' possui valores não numéricos"
+            )
+            continue
+
+        decimal_values = (
+            numeric_values
+            .dropna()
+            .mod(1)
+            .ne(0)
+        )
+
+        if decimal_values.any():
+            errors.append(
+                f"O campo '{column}' possui valores decimais onde eram esperados inteiros."
+            )
+
+    return errors
+
+#Validação de medidas financeiras
+def validate_numeric_measures(df, schema, rules):
+
+    errors = []
+    schema_columns = schema["columns"]
+    start_column = rules["numeric_measure_start_column"]
+
+    if start_column not in schema_columns:
+        errors.append(
+            f"Coluna inicial das medidas financeiras não encontrada no schema: "
+            f"'{start_column}'"
+        )
+
+        return errors
+
+    start_index = schema_columns.index(
+        start_column
+    )
+
+    measure_columns = schema_columns[
+        start_index:
+    ]
+
+    invalid_columns = []
+
+    for column in measure_columns:
+        if column not in df.columns:
+            continue
+
+        converted_values = pd.to_numeric(
+            df[column],
+            errors="coerce"
+        )
+
+        invalid_values = (
+            df[column].notna()
+            & converted_values.isna()
+        )
+
+        if invalid_columns:
+            errors.append(
+                "Medidas financeiras com valores não numéricos: "
+                + ", ".join(invalid_columns)
+            )
+
+        return errors
+
 # ----------------------- Validação principal -------------------------------
 def main():
 
@@ -141,6 +281,7 @@ def main():
         sys.exit(1)
 
     schema = load_schema()
+    quality_rules = load_quality_rules()
 
     print(f"Contrato: {schema['schema_name']}")
     print(f"Versão do schema: {schema['schema_version']}")
@@ -154,6 +295,18 @@ def main():
 
     errors.extend(
         validate_metadata(df)
+    )
+
+    errors.extend(
+        validate_required_fields(df, quality_rules)
+    )
+
+    errors.extend(
+        validate_integer_like_columns(df, quality_rules)
+    )
+
+    errors.extend(
+        validate_numeric_measures(df, schema, quality_rules)
     )
 
     print()
@@ -174,6 +327,11 @@ def main():
         f"Metadados validados: "
         f"{len(METADATA_COLUMNS)} campos técnicos"
     )
+    print(
+        f"Regras de qualidade: "
+        f"{quality_rules['rules_version']}"
+    )
+    print("Campos essenciais e medidas financeiras validadas")
     print("Nenhuma inconsistência estrutural identificada")
 
 if __name__ == "__main__":
