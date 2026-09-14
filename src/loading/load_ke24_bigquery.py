@@ -42,7 +42,7 @@ def validate_input_file(df):
 
     if missing_columns:
         raise ValueError(
-            "O staging não possui metadados necesários para a carga no BigQuery: "
+            "O staging não possui metadados necessários para a carga no BigQuery: "
             +", ".join(missing_columns)
         )
 
@@ -129,14 +129,14 @@ def load_to_bigquery(client, df):
 
 #Execução principal 
 def main():
-    print("\nKE24 - Carga Bigquery\n")
+    print("\nKE24 - Carga BigQuery\n")
 
     if not INPUT_FILE.exists():
         raise FileNotFoundError(
             f"Arquivo staging não encontrado: {INPUT_FILE}"
         )
 
-    print(f"Arquivo aalisado: {INPUT_FILE.name}")
+    print(f"Arquivo analisado: {INPUT_FILE.name}")
 
     df = pd.read_parquet(INPUT_FILE)
 
@@ -174,23 +174,23 @@ def main():
     print("\n Arquivos novos identificados: ")
 
     for file_name in new_files:
-        print(f"= {file_name}")
+        print(f"- {file_name}")
 
-        print(
-            f"\nRegistros a carregar: "
-            f"{len(new_data):,}"
-        )
+    print(
+        f"\nRegistros a carregar: "
+        f"{len(new_data):,}"
+    )
 
-        load_to_bigquery(
-            client, 
-            new_data
-        )
+    load_to_bigquery(
+        client, 
+        new_data
+    )
 
-        print("\nCarga concluída com sucesso!")
+    print("\nCarga concluída com sucesso!")
 
-        update_table = client.get_table(TABLE_ID)
+    update_table = client.get_table(TABLE_ID)
 
-        print(f"Registros atuais no BigQuery: {update_table.num_rows:,}")
+    print(f"Registros atuais no BigQuery: {update_table.num_rows:,}")
 
 if __name__ == "__main__":
     main()
