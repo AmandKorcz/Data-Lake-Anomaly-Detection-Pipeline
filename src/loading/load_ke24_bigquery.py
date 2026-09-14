@@ -98,7 +98,7 @@ def get_loaded_file_hashes(client):
     return loaded_hashes
 
 #Idenificação de novos arquivos
-def filter_new_fles(df, loaded_hashes):
+def filter_new_files(df, loaded_hashes):
     new_data = df[
         ~df["_source_file_sha256"].isin(loaded_hashes)
     ].copy()
@@ -154,7 +154,7 @@ def main():
 
     print(f"Arquivos já carregados no BigQuery: {len(loaded_hashes)}")
 
-    new_data = filter_new_fles(
+    new_data = filter_new_files(
         df,
         loaded_hashes
     )
@@ -176,9 +176,15 @@ def main():
     for file_name in new_files:
         print(f"= {file_name}")
 
-        print(f"\nRegistros a carregar: {len(new_data):,}")
+        print(
+            f"\nRegistros a carregar: "
+            f"{len(new_data):,}"
+        )
 
-        load_to_bigquery(client, new_data)
+        load_to_bigquery(
+            client, 
+            new_data
+        )
 
         print("\nCarga concluída com sucesso!")
 
