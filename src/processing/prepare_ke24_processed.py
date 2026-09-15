@@ -128,7 +128,7 @@ def add_period_key(df):
     if extracted["calendar_year"].isna().any():
         invalid_examples = (
             period_year_text[extracted["calendar_year"].isna()]
-            .drop_duplicated()
+            .drop_duplicates()
             .tolist()
         )
 
@@ -150,6 +150,11 @@ def add_period_key(df):
     period_mismatch = (
         source_period != period_values
     )
+
+    if period_mismatch.any():
+        raise ValueError(
+            "Inconsistência entre period e period_year"
+        )
 
     period_key = (
         calendar_year.astype("string")
