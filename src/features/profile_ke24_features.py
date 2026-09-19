@@ -100,7 +100,7 @@ def build_dimension_profile(df):
     technical_columns = [
         "_load_id",
         "_source_file_sha256",
-        "_source_system"
+        "_source_system",
         "_source_file",
         "_source_row_number",
         "_ingested_at_utc"
