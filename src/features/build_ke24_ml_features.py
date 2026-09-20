@@ -95,12 +95,7 @@ def select_active_measures(measures):
 
 #Feature Engeneering
 def build_engineered_features(measures):
-    active_measure_count = (
-        measures
-        .ne(0)
-        .sum(axis=1)
-    )
-
+    
     positive_measure_count = (
         measures
         .gt(0)
@@ -129,59 +124,12 @@ def build_engineered_features(measures):
         absolute_measures.max(axis=1)
     )
 
-    denominator = (
-        active_measure_count.where(
-            active_measure_count.ne(0),
-            1
-        )
-    )
-
-    mean_absolute_active_value = (
-        total_absolute_value
-        / denominator
-    )
-
-    mean_absolute_active_value = (
-        mean_absolute_active_value.where(
-            active_measure_count.ne(0),
-            0.0
-        )
-    )
-
-    financial_measure_density = (
-        active_measure_count
-        / len(measures.columns)
-    )
-
-    absolute_dominators = (
-        total_absolute_value.where(
-            total_absolute_value.ne(0),
-            1
-        )
-    )
-
-    dominant_measure_share = (
-        max_absolute_value
-        / absolute_dominators
-    )    
-
-    dominant_measure_share = (
-        dominant_measure_share.where(
-            total_absolute_value.ne(0),
-            0.0
-        )
-    )
-
     engineered = pd.DataFrame({
-        "active_measure_count": active_measure_count,
         "positive_measure_count": positive_measure_count,
         "negative_measure_count": negative_measure_count,
         "total_signed_value": total_signed_value,
         "total_absolute_value": total_absolute_value,
         "max_absolute_value": max_absolute_value,
-        "mean_absolute_active_value": mean_absolute_active_value,
-        "financial_measure_density": financial_measure_density,
-        "dominant_measure_share": dominant_measure_share
     })
 
     return engineered
