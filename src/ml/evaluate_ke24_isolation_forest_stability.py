@@ -24,7 +24,7 @@ OUTPUT_FILE = (
     PROJECT_ROOT
     / "data"
     / "curated"
-    / "ke24_isolated_forest_stability.csv"
+    / "ke24_isolation_forest_stability.csv"
 )
 
 RANDOM_STATES = [
