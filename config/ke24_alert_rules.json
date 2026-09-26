@@ -1,0 +1,25 @@
+{
+    "rules_name": "KE24_ALERT_CLASSIFICATION",
+    "rules_version": "0.1",
+    "status": "pending_business_validation",
+
+    "currency_basis": {
+        "currency_type": 10,
+        "description": "local_currency"
+    },
+
+    "business_thresholds_by_company": {
+        "RU01":{
+            "currency": "RUB",
+            "materiality_medium_min": null,
+            "materiality_high_min": null
+        }
+    },
+
+    "technical_thresholds": {
+        "anomaly_percentile_medium_min": null,
+        "anomaly_percentile_high_min": null,
+        "stability_medium_min": null,
+        "stability_high_min": null
+    }
+}

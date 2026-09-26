@@ -36,6 +36,7 @@ CONTEXT_COLUMNS = [
     "_source_row_number",
     "_ingested_at_utc",
     "currency",
+    "currency_type",
     "period",
     "period_year",
     "calendar_year",
