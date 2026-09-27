@@ -214,6 +214,24 @@ def build_validation_dataset(alert_candidates, ml_features):
         .ne(10)
     )
 
+    if invalid_currency_type.any():
+        invalid_values = (
+            result.loc[
+                invalid_currency_type,
+                "currency_type"
+            ]
+            .drop_duplicates()
+            .tolist()
+        )
+
+        raise ValueError(
+            "Foram encontrados currency_type diferentes de 10 (moeda local): "
+            +", ".join(
+                str(value)
+                for value in invalid_values
+            )
+        )
+
     if result[
         "currency"
     ].isna().any():

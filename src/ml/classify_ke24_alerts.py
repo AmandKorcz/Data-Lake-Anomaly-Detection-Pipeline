@@ -88,7 +88,7 @@ def validate_currency_basis(dataset, rules):
             invalid_rows[
                 "currency_type"
             ]
-            .drop.duplicates()
+            .drop_duplicates()
             .tolist()
         )
 
@@ -103,8 +103,10 @@ def validate_currency_basis(dataset, rules):
 #Classificação de materialidade
 def classify_materiality(row, rules):
 
-    company_code = str(
-        row["company_code"]
+    company_code = (
+        str(row["company_code"])
+        .strip()
+        .upper()
     )
 
     company_rules = (
@@ -120,10 +122,21 @@ def classify_materiality(row, rules):
             "company_not_configured"
         )
 
-    configured_currency = (company_rules.get("currency"))
+    configured_currency = (
+        str(
+            company_rules.get(
+                "currency",
+                ""
+            )
+        )
+        .strip()
+        .upper()
+    )
 
-    row_currency = str(
-        row["currency"]
+    row_currency = (
+        str(row["currency"])
+        .strip()
+        .upper()
     )
 
     if configured_currency != row_currency:

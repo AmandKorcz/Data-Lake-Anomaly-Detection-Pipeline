@@ -110,7 +110,7 @@ def validate_company_rules(dataset, rules):
 
         configured_currency = (
             str(
-                company_rules.get("curency", "")
+                company_rules.get("currency", "")
             )
             .strip()
             .upper()
