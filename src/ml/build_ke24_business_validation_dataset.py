@@ -26,7 +26,7 @@ OUTPUT_FILE = (
     / "ke24_business_validation.csv"
 )
 
-IDENTIFY_COLUMNS = [
+IDENTITY_COLUMNS = [
     "_source_file",
     "_source_row_number"
 ]
@@ -43,7 +43,7 @@ BUSINESS_VALIDATION_COLUMNS = [
 #Validação dos arquivos
 def validate_inputs(alert_candidates, ml_features):
     required_candidate_columns = (
-        IDENTIFY_COLUMNS
+        IDENTITY_COLUMNS
         + [
             "anomaly_rank",
             "anomaly_score",
@@ -78,7 +78,7 @@ def validate_inputs(alert_candidates, ml_features):
         )
 
     required_feature_columns = (
-        IDENTIFY_COLUMNS
+        IDENTITY_COLUMNS
         + [
             "currency",
             "currency_type"
@@ -93,17 +93,17 @@ def validate_inputs(alert_candidates, ml_features):
 
     if missing_feature_columns:
         raise ValueError(
-            "Colunas ausentes no dataser de features: "
+            "Colunas ausentes no dataset de features: "
             +", ".join(missing_feature_columns)
         )
 
     if alert_candidates.duplicated(
-        subset=IDENTIFY_COLUMNS
+        subset=IDENTITY_COLUMNS
     ).any():
         raise ValueError("Existem registros duplicados nos candidatos a alerta")
 
     if ml_features.duplicated(
-        subset=IDENTIFY_COLUMNS
+        subset=IDENTITY_COLUMNS
     ).any():
         raise ValueError("Existem registros duplicados no dataset de features")
 
@@ -118,7 +118,7 @@ def load_existing_validation():
     )
 
     required_columns = (
-        IDENTIFY_COLUMNS + BUSINESS_VALIDATION_COLUMNS
+        IDENTITY_COLUMNS + BUSINESS_VALIDATION_COLUMNS
     )
 
     missing_columns = [
@@ -137,7 +137,7 @@ def build_validation_dataset(alert_candidates, ml_features):
 
     currency_context = (
         ml_features[
-            IDENTIFY_COLUMNS
+            IDENTITY_COLUMNS
             + [
                 "currency",
                 "currency_type"
@@ -148,20 +148,25 @@ def build_validation_dataset(alert_candidates, ml_features):
 
     result = alert_candidates.merge(
         currency_context,
-        on=IDENTIFY_COLUMNS,
+        on=IDENTITY_COLUMNS,
         how="left",
         validate="one_to_one"
     )
 
-    invalid_currency_type = (
-        result["currency_type"]
-        .ne(0)
+    #Normalização do currency_type
+    currency_type_numeric = pd.to_numeric(
+        result["currency_type"],
+        errors="coerce"
     )
 
-    if invalid_currency_type.any():
+    invalid_currency_type_format = (
+        currency_type_numeric.isna()
+    )
+
+    if invalid_currency_type_format.any():
         invalid_values = (
             result.loc[
-                invalid_currency_type,
+                invalid_currency_type_format,
                 "currency_type"
             ]
             .drop_duplicates()
@@ -169,12 +174,45 @@ def build_validation_dataset(alert_candidates, ml_features):
         )
 
         raise ValueError(
-            "Foram encontrados currency_type diferentes de 10 (moeda local): "
+            "Foram encontrados valores inválidos em currency_type: "
             +", ".join(
                 str(value)
                 for value in invalid_values
             )
         )
+
+    non_integer_currency_type = (
+        currency_type_numeric
+        .mod(1)
+        .ne(0)
+    )
+
+    if non_integer_currency_type.any():
+        invalid_values = (
+            currency_type_numeric.loc[
+                non_integer_currency_type
+            ]
+            .drop_duplicates()
+            .tolist()
+        )
+
+        raise ValueError(
+            "Foram encontrados currency_type não inteiros: "
+            +", ".join(
+                str(value)
+                for value in invalid_values
+            )
+        )
+
+    result["currency_type"] = (
+        currency_type_numeric
+        .astype("Int64")
+    )
+
+    invalid_currency_type = (
+        result["currency_type"]
+        .ne(10)
+    )
 
     if result[
         "currency"
@@ -186,7 +224,7 @@ def build_validation_dataset(alert_candidates, ml_features):
     if existing_validation is not None:
         result = result.merge(
             existing_validation,
-            on=IDENTIFY_COLUMNS,
+            on=IDENTITY_COLUMNS,
             how="left",
             validate="one_to_one"
         )
@@ -212,7 +250,7 @@ def build_validation_dataset(alert_candidates, ml_features):
 
 #Exibição
 def print_review_sample(result):
-    print("\nTop 1 registros para revisão: \n")
+    print("\nTop 10 registros para revisão: \n")
 
     columns = [
         "anomaly_rank",
