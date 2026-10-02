@@ -12,8 +12,8 @@ INPUT_FILE = (
 )
 
 IDENTITY_COLUMNS = [
-    "source_file",
-    "source_row_number"
+    "_source_file",
+    "_source_row_number"
 ]
 
 ALLOWED_REVIEW_STATUS = {
@@ -32,7 +32,7 @@ def validate_structure(dataset):
     required_columns = (
         IDENTITY_COLUMNS
         + [
-            "reference_documents",
+            "reference_document",
             "review_status",
             "business_validation",
             "validation_reason",
