@@ -61,7 +61,10 @@ def validate_inputs(alert_candidates, ml_features):
             "score_std",
             "flag_count",
             "mean_rank",
-            "stability_rate"
+            "stability_rate",
+            "candidate_threshold_percentile",
+            "candidate_reason",
+            "candidate_status"
         ]
     )
 
@@ -273,6 +276,8 @@ def print_review_sample(result):
     columns = [
         "anomaly_rank",
         "anomaly_score",
+        "anomaly_score_percentile",
+        "candidate_threshold_percentile",
         "materiality_percentile",
         "stability_rate",
         "period_key",
@@ -284,6 +289,7 @@ def print_review_sample(result):
         "total_absolute_value",
         "dominant_measure",
         "dominant_measure_value",
+        "candidate_status",
         "review_status",
         "business_validation"
     ]

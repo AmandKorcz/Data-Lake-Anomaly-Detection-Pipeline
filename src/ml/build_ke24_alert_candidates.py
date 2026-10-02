@@ -31,6 +31,9 @@ IDENTITY_COLUMNS = [
     "_source_row_number"
 ]
 
+#Threshold técnico experimental
+EXPERIMETAL_ANOMALY_PERCENTILE_MIN = 95.0
+
 #Validação
 def validate_inputs(materiality, stability):
 
@@ -85,6 +88,12 @@ def validate_inputs(materiality, stability):
             +", ".join(missing_stability)
         )
 
+    if materiality.duplicated(subset=IDENTITY_COLUMNS).any():
+        raise ValueError("Existem registros duplicados na análise de materialidade.")
+
+    if stability.duplicated(subset=IDENTITY_COLUMNS).any():
+        raise ValueError("Existem registros duplicados na análise de estabildiade.")
+
 #Construção dos candidatos
 def build_alert_candidates(materiality, stability):
 
@@ -108,6 +117,7 @@ def build_alert_candidates(materiality, stability):
     if result["mean_anomaly_score"].isna().any():
         raise ValueError("Existem registros sem dados de estabilidade.")
 
+    #Percentil técnico baseado no anomaly_score
     result[
         "anomaly_score_percentile"
     ] = (
@@ -118,28 +128,55 @@ def build_alert_candidates(materiality, stability):
         * 100
     )
 
+    #Percentual de execuções em que o registro foi marcado como anômalo
     result[
         "stability_rate"
     ] = (
         result["flag_count"] / 5 * 100
     )
 
-    result = result.sort_values(
+    #Seleção experimental dos registros mais relevantes
+    candidate_mask = (
+        result["anomaly_score_percentile"]
+        >= EXPERIMETAL_ANOMALY_PERCENTILE_MIN
+    )
+
+    candidates = result.loc[candidate_mask].copy()
+
+    candidates["candidate_threshold_percentile"] = EXPERIMETAL_ANOMALY_PERCENTILE_MIN
+
+    candidates["candidate_reason"] = (
+        "anomaly_score_percentile >= "
+        + str(EXPERIMETAL_ANOMALY_PERCENTILE_MIN)
+    )
+
+    candidates["candidate_status"] = "pending_business_validation"
+
+    candidates = candidates.sort_values(
         [
-            "anomaly_rank",
-            "materiality_percentile"
+            "anomaly_score_percentile",
+            "stability_rate",
+            "materiality_percentile",
+            "anomaly_score"
         ],
-        ascending=[
-            True,
+        ascending = [
+            False,
+            False,
+            False,
             False
         ],
     )
 
-    return result
+    return candidates
 
 #Exibição
-def print_top_candidates(result):
-    print("\nTop 10 candidatos para revisão: \n")
+def print_candidates_summary(result):
+
+    print(F"\nThreshold técnico experimental: P{EXPERIMETAL_ANOMALY_PERCENTILE_MIN:g}")
+
+    print(f"Registros selecionados: {len(result):,}")
+
+    print("\nCandidatos selecionados para validação de negócio: \n")
 
     columns = [
         "anomaly_rank",
@@ -152,12 +189,12 @@ def print_top_candidates(result):
         "profit_center",
         "total_absolute_value",
         "dominant_measure",
-        "dominant_measure_value"
+        "dominant_measure_value",
+        "candidate_status"
     ]
 
     print(
         result[columns]
-        .head(10)
         .to_string(index=False)
     )
 
@@ -188,14 +225,18 @@ def main():
     validate_inputs(materiality, stability)
     result = build_alert_candidates(materiality, stability)
 
+    if result.empty:
+        raise ValueError(
+            f"Nenhum candidato foi encontrado para P{EXPERIMETAL_ANOMALY_PERCENTILE_MIN}"
+        )
+
     result.to_csv(
         OUTPUT_FILE,
         index=False,
         encoding="utf-8-sig"
     )
 
-    print(f"Registros consolidados: {len(result):,}")
-    print_top_candidates(result)
+    print_candidates_summary(result)
 
     print(f"\nDataset de candidatos gerado em: ")
     print(OUTPUT_FILE)
