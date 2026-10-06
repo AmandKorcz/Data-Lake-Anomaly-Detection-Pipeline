@@ -1,0 +1,25 @@
+{
+    "rules_name": "KE24_ALERT_CLASSIFICATION",
+    "rules_version": "0.1",
+    "status": "experimental_auto_classification",
+
+    "currency_basis": {
+        "currency_type": 10,
+        "description": "local_currency"
+    },
+
+    "business_thresholds_by_company": {
+        "RU01": {
+            "currency": "RUB",
+            "materiality_medium_min": 3170107.57,
+            "materiality_high_min": 4757978.24
+        }
+    },
+
+    "technical_thresholds": {
+        "anomaly_percentile_medium_min": 90,
+        "anomaly_percentile_high_min": 95,
+        "stability_medium_min": 40,
+        "stability_high_min": 100
+    }
+}
