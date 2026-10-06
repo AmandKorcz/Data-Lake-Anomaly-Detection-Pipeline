@@ -310,25 +310,94 @@ def classify_stability(row, rules):
         "low_stability"
     )
 
+def classify_alert_level(row):
+    anomaly_level = (
+        row["anomaly_signal_level"]
+    )
+
+    materiality_level = (
+        row["materiality_level"]
+    )
+
+    stability_level = (
+        row["stability_level"]
+    )
+
+    if (
+        str(anomaly_level).startswith("PENDING")
+        or str(materiality_level).startswith("PENDING")
+        or str(stability_level).startswith("PENDING")
+    ):
+        return (
+            "PENDING",
+            "classification_rules_not_ready"
+        )
+
+    if (
+        anomaly_level == "HIGH"
+        and materiality_level == "HIGH"
+        and stability_level in {
+            "MEDIUM",
+            "HIGH"
+        }
+    ):
+        return (
+            "HIGH",
+            "high_anomaly_high_materiality_stable_signal"
+        )
+
+    if (
+        anomaly_level == "HIGH"
+        and (
+            materiality_level in {
+                "MEDIUM",
+                "HIGH"
+            }
+            or stability_level in {
+                "MEDIUM",
+                "HIGH"
+            }
+        )
+    ):
+        return (
+            "MEDIUM",
+            "high_anomaly_with_relevant_supporting_signal"
+        )
+
+    if (
+        anomaly_level == "MEDIUM"
+        and materiality_level == "HIGH"
+    ):
+        return (
+            "MEDIUM",
+            "medium_anomaly_high_materiality"
+        )
+
+    return (
+        "LOW",
+        "low_combined_priority"
+    )
+
 #Status geral da classificação
-def determine_classification_status(row):
+def determine_classification_status (row, rules):
     materiality_pending = (
         str(row["materiality_level"])
         .startswith("PENDING")
     )
 
     anomaly_pending = (
-        row["anomaly_signal_level"] == "PENDING_TECHNICAL_RULE"
+        row["anomaly_signal_level"]
+        == "PENDING_TECHNICAL_RULE"
     )
 
     stability_pending = (
-        row["stability_level"] == "PENDING_TECHNICAL_RULE"
+        row["stability_level"]
+        == "PENDING_TECHNICAL_RULE"
     )
 
-    technical_pending = (anomaly_pending or stability_pending)
-
-    if materiality_pending and stability_pending:
-        return "PENDING_BUSINESS_AND_TECHNICAL_RULES"
+    technical_pending = (
+        anomaly_pending or stability_pending
+    )
 
     if materiality_pending:
         return "PENDING_BUSINESS_RULE"
@@ -336,13 +405,26 @@ def determine_classification_status(row):
     if technical_pending:
         return "PENDING_TECHNICAL_RULE"
 
+    rules_status = (
+        str(rules.get(
+            "status",
+            ""
+        ))
+        .strip()
+    )
+
+    if rules_status == "experimental_auto_classification":
+        return "EXPERIMENTAL_CLASSIFICATION"
+
     review_status = (
         str(row["review_status"])
         .strip()
         .lower()
     )
 
-    business_validation = (row["business_validation"])
+    business_validation = (
+        row["business_validation"]
+    )
 
     if (
         review_status != "validated"
@@ -386,7 +468,7 @@ def build_classification(dataset, rules):
     ]
 
     result[
-        "anomaly_singal_level"
+        "anomaly_signal_reason"
     ] = [
         item[1]
         for item in anomaly_signal
@@ -410,10 +492,32 @@ def build_classification(dataset, rules):
         for item in stability
     ]
 
+    alert_classification = result.apply(
+        classify_alert_level,
+        axis = 1
+    )
+
+    result[
+        "alert_level"
+    ] = [
+        item[0]
+        for item in alert_classification
+    ]
+
+    result[
+        "alert_reason"
+    ] = [
+        item[1]
+        for item in alert_classification
+    ]
+
     result[
         "classification_status"
     ] = result.apply(
-        determine_classification_status,
+        lambda row: determine_classification_status(
+            row,
+            rules
+        ),
         axis=1
     )
 
@@ -428,6 +532,18 @@ def print_summary(result):
         .value_counts(dropna=False)
         .to_string()
     )
+
+    print(summary)
+
+    print("\nNível final dos alertas: \n")
+
+    print(
+        result["alert_level"]
+        .value_counts(dropna=False)
+        .to_string()
+    )
+
+    print("\nMaterialidade: \n")
 
     print(
         result["materiality_level"]
@@ -476,7 +592,7 @@ def main():
     print("\nKE24 - Classificação dos Alertas\n")
 
     if not INPUT_FILE.exists():
-        raise FileNotFoundError(F"Dataser de validação não encontrado: {INPUT_FILE}")
+        raise FileNotFoundError(F"Dataset de validação não encontrado: {INPUT_FILE}")
 
     dataset = pd.read_csv(
         INPUT_FILE,
