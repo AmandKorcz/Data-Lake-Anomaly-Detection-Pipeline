@@ -317,132 +317,57 @@ def preview_bigquery_incremental(client, staging_df):
         remote_manifest,
     )
 
-
-#Consulta arquivos já carregados
-def get_loaded_file_hashes(client):
-
-    query = f"""
-        SELECT DISTINCT 
-            _source_file_sha256
-        FROM `{TABLE_ID}`
-        WHERE _source_file_sha256 IS NOT NULL
-    """
-
-    query_job = client.query(
-        query, 
-        location=BQ_LOCATION
-    )
-
-    result = query_job.result()
-
-    loaded_hashes = {
-        row["_source_file_sha256"]
-        for row in result
-    }
-
-    return loaded_hashes
-
-#Idenificação de novos arquivos
-def filter_new_files(df, loaded_hashes):
-    new_data = df[
-        ~df["_source_file_sha256"].isin(loaded_hashes)
-    ].copy()
-
-    return new_data
-
 #Carga BigQuery
 def load_to_bigquery(client, df):
 
     validate_bigquery_release(df)
 
-    #Schema da tabela já existente
-    target_table = client.get_table(TABLE_ID)
-
-    job_config = bigquery.LoadJobConfig(
-        schema = target_table.schema,
-        write_disposition = (bigquery.WriteDisposition.WRITE_APPEND),
+    raise RuntimeError(
+        "Gravação BigQuery desabilitada: o mecanismo de escrita transacional ainda não foi implementado."
     )
-
-    load_job = client.load_table_from_dataframe(
-        df, 
-        TABLE_ID,
-        job_config = job_config,
-        location = BQ_LOCATION
-    )
-
-    load_job.result()
-
-    return load_job
 
 #Execução principal 
 def main():
 
-    # Bloqueia destinos e políticas não autorizados
+    # Bloqueia configurações não autorizadas
     validate_bigquery_release()
 
-    print("\nKE24 - Carga BigQuery\n")
+    print("\nKE24 - Prévia de Carga Incremental\n")
 
-    if not INPUT_FILE.exists():
+    if not INPUT_FILE.is_file():
         raise FileNotFoundError(
-            f"Arquivo staging não encontrado: {INPUT_FILE}"
+            "Arquivo de staging não encontrado."
         )
-
-    print(f"Arquivo analisado: {INPUT_FILE.name}")
 
     df = pd.read_parquet(INPUT_FILE)
 
-    print(f"Registros disponíveis no staging: {len(df):,}")
-
-    validate_input_file(df)
+    # Confere o staging protegido
     validate_bigquery_release(df)
 
+    print(f"Registros analisados: {len(df):,}")
+
+    # Consulta exclusivamente metadados da tabela
     client = create_bigquery_client()
 
-    print(f"Projeto GCP: {GCP_PROJECT}")
-
-    print(f"Tabela destino: {TABLE_ID}")
-
-    loaded_hashes = get_loaded_file_hashes(client)
-
-    print(f"Arquivos já carregados no BigQuery: {len(loaded_hashes)}")
-
-    new_data = filter_new_files(
+    plan = preview_bigquery_incremental(
+        client,
         df,
-        loaded_hashes
     )
 
-    if new_data.empty:
-        print("\nNenhum arquivo novo para carregar")
-        print("Carga encerrada sem alterações")
+    result = {
+        "new_files": plan["new_files"],
+        "skipped_files": plan["skipped_files"],
+        "new_records": len(plan["new_rows"]),
+    }
 
-        return 
+    print("\nResultado do planejamento:")
+    print(f"Arquivos novos: {result['new_files']}")
+    print(f"Arquivos ignorados: {result['skipped_files']}")
+    print(f"Registros candidatos: {result['new_records']}")
 
-    new_files = (
-        new_data["_source_file"]
-        .drop_duplicates()
-        .tolist()
-    )
+    print("\nModo de prévia: nenhuma gravação realizada.")
 
-    print("\n Arquivos novos identificados: ")
-
-    for file_name in new_files:
-        print(f"- {file_name}")
-
-    print(
-        f"\nRegistros a carregar: "
-        f"{len(new_data):,}"
-    )
-
-    load_to_bigquery(
-        client, 
-        new_data
-    )
-
-    print("\nCarga concluída com sucesso!")
-
-    update_table = client.get_table(TABLE_ID)
-
-    print(f"Registros atuais no BigQuery: {update_table.num_rows:,}")
+    return result
 
 if __name__ == "__main__":
     main()
