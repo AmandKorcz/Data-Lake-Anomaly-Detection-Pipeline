@@ -1,13 +1,23 @@
 
 import json
-import os
 from pathlib import Path
+
+from src.privacy.hmac_key import load_hmac_key_from_environment
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 POLICY_FILE = PROJECT_ROOT / "config" / "ke24_privacy_policy.json"
 SCHEMA_FILE = PROJECT_ROOT / "config" / "ke24_schema.json"
+
+EXPECTED_METADATA = {
+    "_load_id",
+    "_source_file_sha256",
+    "_source_system",
+    "_source_file",
+    "_source_row_number",
+    "_ingested_at_utc",
+}
 
 
 def load_json(path):
@@ -19,7 +29,7 @@ def load_privacy_runtime():
     policy = load_json(POLICY_FILE)
     schema = load_json(SCHEMA_FILE)
 
-    # Bloqueia a execução enquanto a política não for aprovada
+    # A política precisa ter aprovação corporativa
     if policy.get("status") != "APPROVED":
         raise RuntimeError(
             "Processamento bloqueado: a política de privacidade "
@@ -27,12 +37,18 @@ def load_privacy_runtime():
             f"Status atual: {policy.get('status')}"
         )
 
-    # Verifica a compatibilidade com o contrato KE24
+    # Confere a versão do schema
     if policy["schema_version"] != schema["schema_version"]:
         raise ValueError("Versão do schema incompatível.")
 
     columns = schema["columns"]
-    dimensions = columns[:columns.index("sales_quantity")]
+
+    if "sales_quantity" not in columns:
+        raise ValueError("Coluna sales_quantity não encontrada.")
+
+    dimensions = columns[
+        :columns.index("sales_quantity")
+    ]
 
     classified = (
         policy["keep_dimensions"]
@@ -47,55 +63,26 @@ def load_privacy_runtime():
             "A política não classifica corretamente todas as dimensões."
         )
 
-    expected_metadata = {
-        "_load_id",
-        "_source_file_sha256",
-        "_source_system",
-        "_source_file",
-        "_source_row_number",
-        "_ingested_at_utc",
-    }
-
+    # Verifica o contrato dos metadados
     actions = policy["metadata_actions"]
 
     if (
-        set(actions) != expected_metadata
+        set(actions) != EXPECTED_METADATA
         or any(
-            value not in {"keep", "tokenize"}
-            for value in actions.values()
+            action not in {"keep", "tokenize"}
+            for action in actions.values()
         )
     ):
         raise ValueError("Política de metadados inválida.")
 
+    # As medidas financeiras devem permanecer preservadas
     if policy["measure_policy"] != {
         "start_column": "sales_quantity",
         "action": "keep",
     }:
         raise ValueError("Política de medidas incompatível.")
 
-    # Chave armazenada fora do repositório
-    key_file = os.environ.get("KE24_HMAC_KEY_FILE")
-
-    if not key_file:
-        raise RuntimeError(
-            "Local da chave HMAC não configurado."
-        )
-
-    key_path = Path(key_file)
-
-    if not key_path.is_file():
-        raise FileNotFoundError(
-            "Arquivo da chave HMAC não encontrado."
-        )
-
-    try:
-        secret_key = bytes.fromhex(
-            key_path.read_text(encoding="ascii").strip()
-        )
-    except ValueError as error:
-        raise ValueError("Formato da chave HMAC inválido.") from error
-
-    if len(secret_key) != 32:
-        raise ValueError("A chave HMAC deve possuir 32 bytes.")
+    # Carrega a chave somente depois das validações
+    secret_key = load_hmac_key_from_environment()
 
     return policy, schema, secret_key
