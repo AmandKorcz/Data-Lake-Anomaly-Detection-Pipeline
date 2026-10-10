@@ -1,0 +1,59 @@
+
+{
+  "policy_name": "KE24_PRIVACY",
+  "policy_version": "0.2",
+  "schema_version": "1.1",
+  "status": "DRAFT_REVIEW_REQUIRED",
+
+  "keep_dimensions": [
+    "currency_type",
+    "currency",
+    "period",
+    "period_year",
+    "record_type",
+    "account_record_type",
+    "copa_event_type",
+    "incoterms"
+  ],
+
+  "tokenize_dimensions": [
+    "company_code",
+    "plant",
+    "sales_organization",
+    "profit_center",
+    "business_unit",
+    "plataforms",
+    "business_segment",
+    "reference_document",
+    "customer",
+    "customerhierarchy01",
+    "customerhierarchy02",
+    "customerhierarchy03",
+    "ship_to_party",
+    "acct_assmt_grp_cust",
+    "customer_group",
+    "market",
+    "division",
+    "product",
+    "product_type",
+    "product_hierarchy",
+    "origin_group",
+    "model",
+    "family",
+    "sub_family"
+  ],
+
+  "metadata_actions": {
+    "_load_id": "keep",
+    "_source_file_sha256": "tokenize",
+    "_source_system": "keep",
+    "_source_file": "tokenize",
+    "_source_row_number": "keep",
+    "_ingested_at_utc": "keep"
+  },
+
+  "measure_policy": {
+    "start_column": "sales_quantity",
+    "action": "keep"
+  }
+}

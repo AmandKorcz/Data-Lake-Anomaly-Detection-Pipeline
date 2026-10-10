@@ -5,6 +5,8 @@ import re
 import unicodedata
 import uuid
 
+from src.privacy.anonymize_ke24 import anonymize_ke24_dataframe
+from src.privacy.privacy_runtime import load_privacy_runtime
 
 import pandas as pd
 
@@ -228,7 +230,7 @@ def standardize_ke24_types(df):
 
 def process_ke24_file(input_file, expected_columns=None):
     print("\n")
-    print(f"Processando arquivo: {input_file.name}")
+    print("Processando extração SAP KE24")
     print("\n")
 
     #Identifiaação individual da carga
@@ -236,8 +238,7 @@ def process_ke24_file(input_file, expected_columns=None):
     ingestion_timestamp = datetime.now(timezone.utc)
     source_hash = calculate_file_hash(input_file)
 
-    print(f"LOAD ID: {load_id}")
-    print(f"SHA-256: {source_hash}")
+    print("Identificação e rastreabilidade da carga geradas.")
 
     #Leitura do Excel 
     df = pd.read_excel(input_file)
@@ -352,6 +353,9 @@ def process_ke24_file(input_file, expected_columns=None):
 # ------------------------------------ Pipeline de Ingestão ------------------------------------
 def main():
 
+    # Verifica a política e a chave antes de iniciar a ingestão
+    privacy_policy, privacy_schema, secret_key = load_privacy_runtime()
+
     print(" ")
     print("KE24 - Pipeline de Ingestão")
     print(" ")
@@ -381,12 +385,8 @@ def main():
         exist_ok=True
     )
 
-    print(
-        f"\nArquivos encontrados: {len(input_files)}"
-    )
-
-    for file in input_files:
-        print(f"- {file.name}")
+    print(f"\nArquivos encontrados: {len(input_files)}")
+    print("Nomes dos arquivos de origem omitidos por segurança.")
 
     dataframes = []
     mappings = []
@@ -407,6 +407,25 @@ def main():
             expected_columns
         )
 
+        #Protege as informações antes de qualquer gravação
+        df = anonymize_ke24_dataframe(
+            df=df,
+            policy=privacy_policy,
+            schema=privacy_schema,
+            secret_key=secret_key
+        )
+
+        if df.empty:
+            raise ValueError(
+                "A extração não possui registros após o tratamento."
+            )
+
+        # Identificador seguro do arquivo de origem
+        protected_file_id = str(df["_source_file"].iloc[0])
+
+        # Protege a referência de origem no mapeamento
+        mapping["source_file"] = protected_file_id
+
         #O primeiro arquivo define o layout esperado da execução
         if expected_columns is None:
             expected_columns = normalized_columns
@@ -419,7 +438,7 @@ def main():
         #Gera um .parquet para carga
         individual_output_file = (
             OUTPUT_DIR
-            / f"{input_file.stem}_staging.parquet"
+            / f"ke24_{protected_file_id}_staging.parquet"
         )
 
         df.to_parquet(
