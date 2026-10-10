@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pandas as pd 
 from google.cloud import bigquery
+from src.privacy.privacy_runtime import load_privacy_runtime
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -22,6 +23,8 @@ TABLE_ID = (
     f"{BQ_DATASET}."
     f"{BQ_TABLE}"
 )
+
+PROTECTED_BQ_TABLE = "KE24_staging_protected"
 
 #Validação do staging
 def validate_input_file(df):
@@ -67,6 +70,89 @@ def validate_input_file(df):
             "Existem registros com '_source_file_sha256' vazio"
         )
 
+
+def validate_bigquery_release(df=None):
+    #Verifica se a carga pode utilizar o destino protegido.
+
+    expected_table_id = (
+        f"{GCP_PROJECT}.{BQ_DATASET}.{BQ_TABLE}"
+    )
+
+    if (
+        BQ_TABLE != PROTECTED_BQ_TABLE
+        or TABLE_ID != expected_table_id
+    ):
+        raise RuntimeError(
+            "Carga BigQuery bloqueada: destino diferente da tabela reservada para dados protegidos."
+        )
+
+    # Valida a política corporativa e a configuração da chave
+    policy, schema, _ = load_privacy_runtime()
+
+    if policy.get("status") != "APPROVED":
+        raise RuntimeError(
+            "Carga BigQuery bloqueada: política não aprovada."
+        )
+
+    # Permite verificar apenas a configuração sem receber um DataFrame.
+    if df is None:
+        return
+
+    validate_input_file(df)
+
+    expected_columns = (
+        set(schema["columns"])
+        | set(policy["metadata_actions"])
+    )
+
+    if (
+        df.columns.duplicated().any()
+        or set(df.columns) != expected_columns
+    ):
+        raise ValueError(
+            "Layout incompatível com o contrato protegido."
+        )
+
+    token_columns = list(policy["tokenize_dimensions"])
+
+    token_columns.extend(
+        column
+        for column, action in policy["metadata_actions"].items()
+        if action == "tokenize"
+    )
+
+    # Confere o formato dos identificadores protegidos
+    for column in token_columns:
+        values = df[column].astype("string")
+
+        valid_tokens = (
+            values.str.fullmatch(r"TKN_[0-9a-f]{32}")
+            .fillna(False)
+        )
+
+        invalid_values = (
+            values.notna() & ~valid_tokens
+        )
+
+        if invalid_values.any():
+            raise ValueError(
+                f"A coluna '{column}' contém valores "
+                "não tokenizados."
+            )
+
+    # Esses metadados e identificadores são obrigatórios
+    required_identifiers = [
+        "company_code",
+        "_source_file",
+        "_source_file_sha256",
+    ]
+
+    for column in required_identifiers:
+        if df[column].isna().any():
+            raise ValueError(
+                f"Identificador obrigatório ausente: {column}"
+            )
+
 #Conexão com o BigQuery
 def create_bigquery_client():
     return bigquery.Client(
@@ -108,6 +194,8 @@ def filter_new_files(df, loaded_hashes):
 #Carga BigQuery
 def load_to_bigquery(client, df):
 
+    validate_bigquery_release(df)
+    
     #Schema da tabela já existente
     target_table = client.get_table(TABLE_ID)
 
@@ -129,6 +217,10 @@ def load_to_bigquery(client, df):
 
 #Execução principal 
 def main():
+
+    # Bloqueia destinos e políticas não autorizados
+    validate_bigquery_release()
+
     print("\nKE24 - Carga BigQuery\n")
 
     if not INPUT_FILE.exists():
@@ -143,6 +235,7 @@ def main():
     print(f"Registros disponíveis no staging: {len(df):,}")
 
     validate_input_file(df)
+    validate_bigquery_release(df)
 
     client = create_bigquery_client()
 

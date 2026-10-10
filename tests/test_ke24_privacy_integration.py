@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 import io
+import traceback
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
@@ -195,6 +196,59 @@ class TestKE24PrivacyIntegration(unittest.TestCase):
                 self.assertNotIn("COMP_A", file.name)
                 self.assertNotIn("COMP_B", file.name)
 
+    
+    def test_error_does_not_expose_original_filename(self):
+        schema = load_json("ke24_schema.json")
+        policy = load_json("ke24_privacy_policy.json")
 
+        with tempfile.TemporaryDirectory() as directory:
+            temp_root = Path(directory)
+
+            raw_dir = temp_root / "raw"
+            staging_dir = temp_root / "staging"
+
+            raw_dir.mkdir()
+            staging_dir.mkdir()
+
+            sensitive_name = "sap_empresa_confidencial_03_2026.xlsx"
+
+            fake_file = raw_dir / sensitive_name
+            fake_file.write_bytes(b"arquivo ficticio")
+
+            with (
+                patch.object(ingestion, "RAW_DIR", raw_dir),
+                patch.object(ingestion, "OUTPUT_DIR", staging_dir),
+                patch.object(
+                    ingestion,
+                    "load_privacy_runtime",
+                    return_value=(policy, schema, TEST_KEY),
+                ),
+                patch.object(
+                    ingestion,
+                    "process_ke24_file",
+                    side_effect=ValueError(
+                        f"Erro ao processar {sensitive_name}"
+                    ),
+                ),
+            ):
+                with self.assertRaises(RuntimeError) as captured:
+                    ingestion.main()
+
+            error_message = str(captured.exception)
+
+            traceback_text = "".join(
+                traceback.format_exception(captured.exception)
+            )
+
+            self.assertNotIn(
+                sensitive_name,
+                error_message
+            )
+
+            self.assertNotIn(
+                sensitive_name,
+                traceback_text
+            )
+    
 if __name__ == "__main__":
     unittest.main()

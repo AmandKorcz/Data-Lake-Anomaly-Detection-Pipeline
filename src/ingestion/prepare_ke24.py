@@ -395,25 +395,35 @@ def main():
     total_source_rows = 0
 
     #Processando cada extração individualmente
-    for input_file in input_files:
+    
+    # Processa cada extração individualmente
+    for file_number, input_file in enumerate(input_files, start=1):
 
-        (
-            df, 
-            mapping,
-            normalized_columns,
-            source_row_count
-        ) = process_ke24_file(
-            input_file,
-            expected_columns
-        )
+        try:
+            (
+                df,
+                mapping,
+                normalized_columns,
+                source_row_count
+            ) = process_ke24_file(
+                input_file,
+                expected_columns
+            )
 
-        #Protege as informações antes de qualquer gravação
-        df = anonymize_ke24_dataframe(
-            df=df,
-            policy=privacy_policy,
-            schema=privacy_schema,
-            secret_key=secret_key
-        )
+            # Aplica a proteção antes de gravar os dados
+            df = anonymize_ke24_dataframe(
+                df=df,
+                policy=privacy_policy,
+                schema=privacy_schema,
+                secret_key=secret_key
+            )
+
+        except Exception:
+            raise RuntimeError(
+                f"Falha no processamento da extração "
+                f"{file_number}/{len(input_files)}. "
+                "Verifique a origem em ambiente restrito."
+            ) from None
 
         if df.empty:
             raise ValueError(
