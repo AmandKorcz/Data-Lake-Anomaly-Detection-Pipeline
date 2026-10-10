@@ -1,4 +1,3 @@
-
 import os
 import tempfile
 import unittest
@@ -95,6 +94,42 @@ class TestHMACKeyManagement(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 hmac_key.load_hmac_key_from_environment()
+
+    def test_load_key_from_dotenv(self):
+        # Cria uma chave fictícia
+        self.write_key(self.test_key.hex())
+
+        # Simula a raiz de outro projeto
+        fake_repository = self.temp_path / "fake_repository"
+        fake_repository.mkdir()
+
+        # Configura apenas o caminho da chave no .env
+        env_file = fake_repository / ".env"
+
+        env_file.write_text(
+            f"KE24_HMAC_KEY_FILE={self.key_path.as_posix()}\n",
+            encoding="utf-8",
+        )
+
+        # Remove temporariamente as variáveis do ambiente
+        # e força a leitura do .env fictício
+        with (
+            patch.object(
+                hmac_key,
+                "PROJECT_ROOT",
+                fake_repository,
+            ),
+            patch.dict(
+                os.environ,
+                {},
+                clear=True,
+            ),
+        ):
+            loaded_key = (
+                hmac_key.load_hmac_key_from_environment()
+            )
+
+        self.assertEqual(loaded_key, self.test_key)
 
 
 if __name__ == "__main__":

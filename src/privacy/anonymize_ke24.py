@@ -21,7 +21,7 @@ GLOBAL_FIELDS = {
 
 
 def normalize_value(value):
-    """Prepara o valor para tokenização sem perder zeros à esquerda."""
+    #Prepara o valor para tokenização sem perder zeros à esquerda.
 
     if pd.isna(value):
         return None
@@ -35,7 +35,7 @@ def normalize_value(value):
 
 
 def generate_token(value, column, company, secret_key):
-    """Gera um token determinístico usando HMAC-SHA256."""
+    #Gera um token determinístico usando HMAC-SHA256.
 
     normalized_value = normalize_value(value)
 
@@ -71,7 +71,7 @@ def generate_token(value, column, company, secret_key):
 
 
 def anonymize_ke24_dataframe(df, policy, schema, secret_key):
-    """Aplica a política de tokenização ao DataFrame."""
+    #Aplica a política de tokenização ao DataFrame
 
     if not isinstance(secret_key, bytes) or len(secret_key) < 32:
         raise ValueError(
