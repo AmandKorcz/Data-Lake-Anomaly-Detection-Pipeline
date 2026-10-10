@@ -4,6 +4,13 @@ import pandas as pd
 from google.cloud import bigquery
 from src.privacy.privacy_runtime import load_privacy_runtime
 
+from src.loading.plan_ke24_incremental import (
+    FILE_ID,
+    BUSINESS_KEY,
+    MANIFEST_COLUMNS,
+    plan_incremental_load,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 INPUT_FILE = (
@@ -159,6 +166,158 @@ def create_bigquery_client():
         project=GCP_PROJECT
     )
 
+#Consulta somente metadados da tabela protegida, sem ler medidas financeiras nem gravar dados
+def get_loaded_file_manifest(client):
+
+    # Exige destino protegido e política autorizada
+    validate_bigquery_release()
+
+    target_table = client.get_table(TABLE_ID)
+
+    required_columns = {
+        FILE_ID,
+        "_source_file",
+        "_source_row_number",
+        *BUSINESS_KEY,
+    }
+
+    available_columns = {
+        field.name
+        for field in target_table.schema
+    }
+
+    if not required_columns.issubset(available_columns):
+        raise ValueError(
+            "A tabela protegida não possui os "
+            "metadados necessários."
+        )
+
+    query = f"""
+        SELECT
+            _source_file_sha256,
+            _source_file,
+            company_code,
+            period_year,
+            currency,
+            COUNT(*) AS record_count,
+            COUNT(DISTINCT _source_row_number)
+                AS distinct_row_count
+        FROM `{TABLE_ID}`
+        GROUP BY
+            _source_file_sha256,
+            _source_file,
+            company_code,
+            period_year,
+            currency
+    """
+
+    query_job = client.query(
+        query,
+        location=BQ_LOCATION,
+    )
+
+    records = [
+        dict(row.items())
+        for row in query_job.result()
+    ]
+
+    # Tabela protegida existente, mas sem registros
+    if not records:
+        return pd.DataFrame(
+            columns=MANIFEST_COLUMNS
+        )
+
+    required_result = (
+        set(MANIFEST_COLUMNS)
+        | {"_source_file", "distinct_row_count"}
+    )
+
+    if any(
+        not required_result.issubset(record)
+        for record in records
+    ):
+        raise ValueError(
+            "A consulta retornou um manifesto incompleto."
+        )
+
+    manifest = pd.DataFrame(records)
+
+    if manifest[list(required_result)].isna().any().any():
+        raise ValueError(
+            "O manifesto remoto contém valores nulos."
+        )
+
+    # Os identificadores devem estar protegidos
+    for column in [
+        FILE_ID,
+        "_source_file",
+        "company_code",
+    ]:
+        valid_tokens = (
+            manifest[column]
+            .astype("string")
+            .str.fullmatch(r"TKN_[0-9a-f]{32}")
+            .fillna(False)
+        )
+
+        if not valid_tokens.all():
+            raise ValueError(
+                "O manifesto contém identificadores "
+                "não tokenizados."
+            )
+
+    # Detecta cargas parciais e linhas duplicadas
+    try:
+        counts = pd.to_numeric(
+            manifest["record_count"],
+            errors="raise",
+        )
+
+        distinct_counts = pd.to_numeric(
+            manifest["distinct_row_count"],
+            errors="raise",
+        )
+
+    except (ValueError, TypeError) as error:
+        raise ValueError(
+            "O manifesto possui contagens inválidas."
+        ) from error
+
+    if (
+        counts.le(0).any()
+        or counts.mod(1).ne(0).any()
+        or distinct_counts.ne(counts).any()
+    ):
+        raise ValueError(
+            "A tabela protegida contém registros "
+            "duplicados ou contagens inconsistentes."
+        )
+
+    if (
+        manifest[FILE_ID].duplicated().any()
+        or manifest.duplicated(BUSINESS_KEY).any()
+    ):
+        raise ValueError(
+            "O manifesto remoto contém arquivos "
+            "ou períodos duplicados."
+        )
+
+    return manifest[MANIFEST_COLUMNS].copy()
+
+#Planeja a carga incremental
+def preview_bigquery_incremental(client, staging_df):
+
+    # Protege também o DataFrame local
+    validate_bigquery_release(staging_df)
+
+    remote_manifest = get_loaded_file_manifest(client)
+
+    return plan_incremental_load(
+        staging_df,
+        remote_manifest,
+    )
+
+
 #Consulta arquivos já carregados
 def get_loaded_file_hashes(client):
 
@@ -195,7 +354,7 @@ def filter_new_files(df, loaded_hashes):
 def load_to_bigquery(client, df):
 
     validate_bigquery_release(df)
-    
+
     #Schema da tabela já existente
     target_table = client.get_table(TABLE_ID)
 
