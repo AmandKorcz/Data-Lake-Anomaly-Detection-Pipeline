@@ -4,6 +4,7 @@ FILE_ID = "_source_file_sha256"
 
 BUSINESS_KEY = [
     "company_code",
+    "period",
     "period_year",
     "currency",
 ]
@@ -100,6 +101,7 @@ def build_file_manifest(staging_df):
         sort=False,
     ).agg(
         company_code=("company_code", "first"),
+        period=("period", "first"),
         period_year=("period_year", "first"),
         currency=("currency", "first"),
         record_count=("_source_row_number", "size"),
@@ -112,7 +114,7 @@ def build_file_manifest(staging_df):
             "empresa, período e moeda."
         )
 
-    return manifest[MANIFEST_COLUMNS]
+    return manifest[MANIFEST_COLUMNS]   
 
 #Compara a base local com arquivos já carregados, sem conexão com o BigQuery
 def plan_incremental_load(staging_df, loaded_manifest):

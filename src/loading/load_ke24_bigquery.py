@@ -197,6 +197,7 @@ def get_loaded_file_manifest(client):
             _source_file_sha256,
             _source_file,
             company_code,
+            period,
             period_year,
             currency,
             COUNT(*) AS record_count,
@@ -207,6 +208,7 @@ def get_loaded_file_manifest(client):
             _source_file_sha256,
             _source_file,
             company_code,
+            period,
             period_year,
             currency
     """

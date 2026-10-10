@@ -34,6 +34,7 @@ class TestKE24BigQueryManifest(unittest.TestCase):
             "_source_file",
             "_source_row_number",
             "company_code",
+            "period",
             "period_year",
             "currency",
         ]
@@ -115,6 +116,7 @@ class TestKE24BigQueryManifest(unittest.TestCase):
             "_source_file_sha256": row["_source_file_sha256"],
             "_source_file": row["_source_file"],
             "company_code": row["company_code"],
+            "period": row["period"],
             "period_year": row["period_year"],
             "currency": row["currency"],
             "record_count": len(staging_df),

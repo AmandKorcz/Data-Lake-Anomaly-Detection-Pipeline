@@ -1,4 +1,3 @@
-
 import unittest
 
 import pandas as pd
@@ -16,8 +15,7 @@ def fake_file(
     count=2,
     currency="RUB",
 ):
-    """Cria registros fictícios com tokens simulados."""
-
+    # Cria registros fictícios com tokens simulados
     rows = []
 
     for index in range(count):
@@ -26,12 +24,12 @@ def fake_file(
             "_source_file": "TKN_" + file_char * 32,
             "_source_row_number": index + 2,
             "company_code": "TKN_" + company_char * 32,
+            "period": int(period.split(".")[0]),
             "period_year": period,
             "currency": currency,
         })
 
     return pd.DataFrame(rows)
-
 
 class TestKE24IncrementalPlan(unittest.TestCase):
 
@@ -147,6 +145,25 @@ class TestKE24IncrementalPlan(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_file_manifest(batch)
 
+    def test_different_months_with_same_year(self):
+        january = fake_file("a", "c", "01.2026")
+        february = fake_file("b", "c", "02.2026")
+
+        january["period_year"] = "2026"
+        february["period_year"] = "2026"
+
+        batch = pd.concat(
+            [january, february],
+            ignore_index=True,
+        )
+
+        manifest = build_file_manifest(batch)
+
+        self.assertEqual(len(manifest), 2)
+        self.assertEqual(
+            set(manifest["period"]),
+            {1, 2},
+        )
 
 if __name__ == "__main__":
     unittest.main()
