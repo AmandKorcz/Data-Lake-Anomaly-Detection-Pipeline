@@ -114,7 +114,6 @@ def classify_materiality(row, rules):
     company_code = (
         str(row["company_code"])
         .strip()
-        .upper()
     )
 
     company_rules = (
