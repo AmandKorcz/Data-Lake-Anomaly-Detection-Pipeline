@@ -1,0 +1,22 @@
+{
+  "rules_name": "KE24_ALERT_CLASSIFICATION_EXAMPLE",
+  "rules_version": "0.1",
+  "status": "experimental_auto_classification",
+  "currency_basis": {
+    "currency_type": 10,
+    "description": "local_currency"
+  },
+  "business_thresholds_by_company": {
+    "TEST_COMPANY_01": {
+      "currency": "BRL",
+      "materiality_medium_min": 100.0,
+      "materiality_high_min": 300.0
+    }
+  },
+  "technical_thresholds": {
+    "anomaly_percentile_medium_min": 90,
+    "anomaly_percentile_high_min": 95,
+    "stability_medium_min": 40,
+    "stability_high_min": 100
+  }
+}
