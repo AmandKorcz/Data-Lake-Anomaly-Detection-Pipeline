@@ -1,7 +1,7 @@
 from pathlib import Path
-import json
 
 import pandas as pd
+from src.ml.load_ke24_alert_rules import load_protected_alert_rules
 
 #configuração
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -13,12 +13,6 @@ INPUT_FILE = (
     / "ke24_business_validation.csv"
 )
 
-RULES_FILE = (
-    PROJECT_ROOT
-    / "config"
-    / "ke24_alert_rules.json"
-)
-
 OUTPUT_FILE = (
     PROJECT_ROOT
     / "data"
@@ -28,17 +22,7 @@ OUTPUT_FILE = (
 
 #Carregamento das regras
 def load_rules():
-    if not RULES_FILE.exists():
-        raise FileNotFoundError(f"Arquivo de regras não encontrado: {RULES_FILE}")
-
-    with open(
-        RULES_FILE,
-        "r",
-        encoding="utf-8"
-    ) as file:
-        rules = json.load(file)
-
-    return rules 
+    return load_protected_alert_rules()
 
 #Validação
 def validate_dataset(dataset):
@@ -114,7 +98,6 @@ def classify_materiality(row, rules):
     company_code = (
         str(row["company_code"])
         .strip()
-        .upper()
     )
 
     company_rules = (
