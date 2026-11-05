@@ -97,7 +97,7 @@ def validate_reviwed_records(dataset):
         dataset["review_status"]
         .astype("string")
         .str.strip()
-        .str.lower()
+        .str.upper()
     )
 
     validated = dataset[
