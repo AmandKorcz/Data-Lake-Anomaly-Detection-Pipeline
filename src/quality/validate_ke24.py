@@ -216,26 +216,20 @@ def validate_integer_like_columns(df, rules):
 
 #Validação de medidas financeiras
 def validate_numeric_measures(df, schema, rules):
-
     errors = []
+
     schema_columns = schema["columns"]
     start_column = rules["numeric_measure_start_column"]
 
     if start_column not in schema_columns:
         errors.append(
-            f"Coluna inicial das medidas financeiras não encontrada no schema: "
+            f"Coluna inicial das medidas financeiras não encontrada: "
             f"'{start_column}'"
         )
-
         return errors
 
-    start_index = schema_columns.index(
-        start_column
-    )
-
-    measure_columns = schema_columns[
-        start_index:
-    ]
+    start_index = schema_columns.index(start_column)
+    measure_columns = schema_columns[start_index:]
 
     invalid_columns = []
 
@@ -253,13 +247,16 @@ def validate_numeric_measures(df, schema, rules):
             & converted_values.isna()
         )
 
-        if invalid_columns:
-            errors.append(
-                "Medidas financeiras com valores não numéricos: "
-                + ", ".join(invalid_columns)
-            )
+        if invalid_values.any():
+            invalid_columns.append(column)
 
-        return errors
+    if invalid_columns:
+        errors.append(
+            "Medidas financeiras com valores não numéricos: "
+            + ", ".join(invalid_columns)
+        )
+
+    return errors
 
 # ----------------------- Validação principal -------------------------------
 def main():

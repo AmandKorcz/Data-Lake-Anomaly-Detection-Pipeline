@@ -239,9 +239,46 @@ def process_ke24_file(input_file, expected_columns=None):
     source_hash = calculate_file_hash(input_file)
 
     print("Identificação e rastreabilidade da carga geradas.")
+   
+    # Leitura inicial apenas dos cabeçalhos
+    header_df = pd.read_excel(
+        input_file,
+        nrows=0
+    )
 
-    #Leitura do Excel 
-    df = pd.read_excel(input_file)
+    source_columns = list(header_df.columns)
+
+    # Identifica os nomes técnicos das colunas
+    normalized_headers = make_unique([
+        normalize_column_name(column)
+        for column in source_columns
+    ])
+
+    if "sales_quantity" not in normalized_headers:
+        raise ValueError(
+            "Coluna sales_quantity não encontrada no Excel."
+        )
+
+    # As colunas anteriores a sales_quantity são dimensões
+    measure_start_index = normalized_headers.index(
+        "sales_quantity"
+    )
+
+    # Preserva identificadores como texto, exceto period
+    text_columns = {
+        source_column: "string"
+        for source_column, technical_column in zip(
+            source_columns[:measure_start_index],
+            normalized_headers[:measure_start_index]
+        )
+        if technical_column != "period"
+    }
+
+    # Leitura completa com os tipos definidos
+    df = pd.read_excel(
+        input_file,
+        dtype=text_columns
+    )
 
     if df.empty:
         raise ValueError(

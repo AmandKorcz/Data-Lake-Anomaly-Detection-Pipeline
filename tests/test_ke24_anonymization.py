@@ -8,6 +8,8 @@ from src.privacy.anonymize_ke24 import (
     anonymize_ke24_dataframe,
 )
 
+from tempfile import TemporaryDirectory
+from src.ingestion.prepare_ke24 import process_ke24_file
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -245,8 +247,75 @@ class TestKE24Anonymization(unittest.TestCase):
                 f"Campo não tokenizado: {column}",
             )
 
+    
+    def test_excel_preserves_identifiers_before_tokenization(self):
+        columns = self.schema["columns"]
+        measure_start = columns.index("sales_quantity")
 
+        records = []
 
+        for customer in ["001234", "1234", "001234"]:
+            record = {
+                column: "EXEMPLO"
+                for column in columns[:measure_start]
+            }
+
+            record.update({
+                column: 0.0
+                for column in columns[measure_start:]
+            })
+
+            record.update({
+                "company_code": "0001",
+                "customer": customer,
+                "period": 1,
+                "period_year": "01.2026",
+                "currency": "BRL",
+                "sales_quantity": 10.0,
+                "revenue": 150.0,
+            })
+
+            records.append(record)
+
+        with TemporaryDirectory() as folder:
+            file_path = Path(folder) / "ke24_teste.xlsx"
+            pd.DataFrame(records).to_excel(
+                file_path,
+                index=False
+            )
+
+            original, _, _, _ = process_ke24_file(
+                file_path
+            )
+
+            self.assertEqual(
+                original["customer"].tolist(),
+                ["001234", "1234", "001234"]
+            )
+
+            protected = anonymize_ke24_dataframe(
+                original,
+                self.policy,
+                self.schema,
+                TEST_KEY
+            )
+
+            tokens = protected["customer"].tolist()
+
+            self.assertNotEqual(tokens[0], tokens[1])
+            self.assertEqual(tokens[0], tokens[2])
+
+            self.assertTrue(
+                all(token.startswith("TKN_") for token in tokens)
+            )
+
+            measure_columns = columns[measure_start:]
+
+            pd.testing.assert_frame_equal(
+                original[measure_columns],
+                protected[measure_columns],
+                check_exact=True
+            )
 
 if __name__ == "__main__":
     unittest.main()

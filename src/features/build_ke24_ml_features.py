@@ -71,9 +71,20 @@ def prepare_measure_matrix(df, measure_columns):
             pd.to_numeric,
             errors="coerce"
         )
-        .fillna(0.0)
     )
+
+    invalid_columns = measures.columns[
+        measures.isna().any()
+    ].tolist()
+
+    if invalid_columns:
+        raise ValueError(
+            "Medidas com valores nulos ou não numéricos: "
+            + ", ".join(invalid_columns)
+        )
+
     return measures
+
 
 #Seleção das medidas com movimento
 def select_active_measures(measures):
@@ -96,29 +107,38 @@ def select_active_measures(measures):
 
 #Feature Engeneering
 def build_engineered_features(measures):
-    
+
+    if "sales_quantity" not in measures.columns:
+        raise ValueError(
+            "Coluna sales_quantity não encontrada."
+        )
+
+    # Separa a quantidade das medidas monetárias
+    financial_measures = measures.drop(
+        columns=["sales_quantity"]
+    )
+
+    if financial_measures.shape[1] == 0:
+        raise ValueError(
+            "Nenhuma medida financeira encontrada."
+        )
+
     positive_measure_count = (
-        measures
-        .gt(0)
-        .sum(axis=1)
+        financial_measures.gt(0).sum(axis=1)
     )
 
     negative_measure_count = (
-        measures
-        .lt(0)
-        .sum(axis=1)
+        financial_measures.lt(0).sum(axis=1)
     )
 
     total_signed_value = (
-        measures.sum(axis=1)
+        financial_measures.sum(axis=1)
     )
 
-    absolute_measures = (
-        measures.abs()
-    )
+    absolute_measures = financial_measures.abs()
 
     total_absolute_value = (
-        absolute_measures.sum(axis = 1)
+        absolute_measures.sum(axis=1)
     )
 
     max_absolute_value = (
@@ -146,7 +166,11 @@ def build_feature_manifest(measure_columns, active_measure, engineered_columns):
 
         rows.append({
             "feature": column,
-            "feature_type": "financial_measure",
+            "feature_type": (
+                "quantity_measure"
+                if column == "sales_quantity"
+                else "financial_measure"
+            ),
             "selected_for_model": selected,
             "reason": (
                 "movement_detected"
