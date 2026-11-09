@@ -3,8 +3,22 @@ from pathlib import Path
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 
+import json
+
+import numpy as np
+
+from src.privacy.validate_protected_dataset import (
+    validate_protected_dataset,
+)
+
 #Configurações
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+PRIVACY_POLICY_FILE = (
+    PROJECT_ROOT
+    / "config"
+    / "ke24_privacy_policy.json"
+)
 
 TRAINING_FILE = (
     PROJECT_ROOT
@@ -73,16 +87,29 @@ def validate_inputs(training_matrix, context_data):
             +", ".join(missing_context)
         )
 
+    # Valida os identificadores antes de treinar o modelo.
+    with PRIVACY_POLICY_FILE.open(
+        "r",
+        encoding="utf-8"
+    ) as file:
+        privacy_policy = json.load(file)
+
+    validate_protected_dataset(
+        context_data,
+        privacy_policy,
+        require_all_columns=False,
+    )
+
     if training_matrix.isna().any().any():
         raise ValueError("A matriz de treinamento possui valores nulos.")
 
 #Treinamento
-def train_isolation_forest(training_matrix):
+def train_isolation_forest(training_matrix, random_state=42):
 
     model = IsolationForest(
         n_estimators=300,
         contamination="auto",
-        random_state=42,
+        random_state=random_state,
         n_jobs=-1,
     )
 
@@ -121,6 +148,123 @@ def build_anomaly_scores(model, training_matrix):
     )
 
     return scores
+
+
+def build_grouped_anomaly_scores(
+    training_matrix,
+    context_data,
+    min_group_size=20,
+    random_state=42,
+):
+    validate_inputs(training_matrix, context_data)
+
+    required = {
+        "company_code",
+        "currency",
+        "currency_type",
+    }
+
+    if not required.issubset(context_data.columns):
+        raise ValueError("Missing monetary context")
+
+    if min_group_size < 20:
+        raise ValueError("Minimum group size must be at least 20")
+
+    context = context_data.reset_index(drop=True).copy()
+
+    companies = context["company_code"].astype("string")
+    currencies = (
+        context["currency"]
+        .astype("string")
+        .str.strip()
+        .str.upper()
+    )
+
+    currency_types = pd.to_numeric(
+        context["currency_type"],
+        errors="coerce",
+    )
+
+    if not companies.str.fullmatch(
+        r"TKN_[0-9a-f]{32}"
+    ).fillna(False).all():
+        raise ValueError("Invalid company tokens")
+
+    if not currencies.str.fullmatch(
+        r"[A-Z]{3}"
+    ).fillna(False).all():
+        raise ValueError("Invalid currency")
+
+    if not currency_types.eq(10).all():
+        raise ValueError("Expected currency_type 10")
+
+    matrix = (
+        training_matrix
+        .reset_index(drop=True)
+        .apply(pd.to_numeric, errors="coerce")
+    )
+
+    if not np.isfinite(
+        matrix.to_numpy(dtype=float)
+    ).all():
+        raise ValueError("Invalid training values")
+
+    groups = pd.DataFrame({
+        "company_code": companies,
+        "currency": currencies,
+    })
+
+    grouped_positions = groups.groupby(
+        ["company_code", "currency"],
+        sort=True,
+    ).indices
+
+    results = []
+
+    for positions in grouped_positions.values():
+        if len(positions) < min_group_size:
+            raise ValueError(
+                "Group has insufficient training records"
+            )
+
+        group_matrix = (
+            matrix.iloc[positions]
+            .reset_index(drop=True)
+        )
+
+        model = train_isolation_forest(
+            group_matrix,
+            random_state=random_state,
+        )
+
+        scores = build_anomaly_scores(
+            model,
+            group_matrix,
+        )
+
+        scores["anomaly_score_percentile"] = (
+            scores["anomaly_score"]
+            .rank(method="average", pct=True)
+            .mul(100)
+        )
+
+        scores["model_group_size"] = len(positions)
+        scores["_row_position"] = positions
+
+        results.append(scores)
+
+    combined = pd.concat(
+        results,
+        ignore_index=True,
+    )
+
+    return (
+        combined
+        .sort_values("_row_position")
+        .drop(columns="_row_position")
+        .reset_index(drop=True)
+    )
+
 
 #Resultado
 def build_results(context_data, scores):

@@ -1,8 +1,20 @@
 from pathlib import Path
 import pandas as pd
 
+import json
+
+from src.privacy.validate_protected_dataset import (
+    validate_protected_dataset,
+)
+
 #Configurações
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+PRIVACY_POLICY_FILE = (
+    PROJECT_ROOT
+    / "config"
+    / "ke24_privacy_policy.json"
+)
 
 INPUT_FILE = (
     PROJECT_ROOT
@@ -212,6 +224,22 @@ def main():
         )
 
     df = pd.read_parquet(INPUT_FILE)
+    
+    # Carrega a política para conferir os identificadores
+    with PRIVACY_POLICY_FILE.open(
+        "r",
+        encoding="utf-8"
+    ) as file:
+        privacy_policy = json.load(file)
+
+    # Impede processamento de datasets sem tokenização
+    validate_protected_dataset(
+        df,
+        privacy_policy,
+        require_all_columns=True,
+    )
+
+    print("Validação de privacidade: APROVADA")
 
     print(
         f"Registros recebidos: "

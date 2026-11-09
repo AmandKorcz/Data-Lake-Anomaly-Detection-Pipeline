@@ -2,6 +2,8 @@ from pathlib import Path
 
 import pandas as pd
 
+import numpy as np
+
 #Configurações
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -50,7 +52,10 @@ def validate_inputs(materiality, stability):
             "total_absolute_value",
             "materiality_percentile",
             "dominant_measure",
-            "dominant_measure_value"
+            "dominant_measure_value",
+            "company_code",
+            "currency",
+            "currency_type"
         ]
     )
 
@@ -94,6 +99,93 @@ def validate_inputs(materiality, stability):
     if stability.duplicated(subset=IDENTITY_COLUMNS).any():
         raise ValueError("Existem registros duplicados na análise de estabildiade.")
 
+
+def calculate_grouped_anomaly_percentile(
+    dataset,
+    min_group_size=20,
+):
+    required = {
+        "company_code",
+        "currency",
+        "currency_type",
+        "anomaly_score",
+    }
+
+    missing = required - set(dataset.columns)
+
+    if missing:
+        raise ValueError(
+            f"Missing candidate fields: {sorted(missing)}"
+        )
+
+    if min_group_size < 20:
+        raise ValueError("Minimum group size must be at least 20")
+
+    companies = (
+        dataset["company_code"]
+        .astype("string")
+        .str.strip()
+    )
+
+    currencies = (
+        dataset["currency"]
+        .astype("string")
+        .str.strip()
+        .str.upper()
+    )
+
+    currency_types = pd.to_numeric(
+        dataset["currency_type"],
+        errors="coerce",
+    )
+
+    scores = pd.to_numeric(
+        dataset["anomaly_score"],
+        errors="coerce",
+    )
+
+    if not companies.str.fullmatch(
+        r"TKN_[0-9a-f]{32}"
+    ).fillna(False).all():
+        raise ValueError("Invalid company tokens")
+
+    if not currencies.str.fullmatch(
+        r"[A-Z]{3}"
+    ).fillna(False).all():
+        raise ValueError("Invalid currency")
+
+    if not currency_types.eq(10).all():
+        raise ValueError("Expected currency_type 10")
+
+    if not np.isfinite(
+        scores.to_numpy(dtype=float)
+    ).all():
+        raise ValueError("Invalid anomaly scores")
+
+    grouped_data = pd.DataFrame({
+        "company_code": companies,
+        "currency": currencies,
+        "score": scores,
+    }, index=dataset.index)
+
+    group_sizes = (
+        grouped_data
+        .groupby(["company_code", "currency"])["score"]
+        .transform("size")
+    )
+
+    if group_sizes.lt(min_group_size).any():
+        raise ValueError(
+            "Group has insufficient training records"
+        )
+
+    return (
+        grouped_data
+        .groupby(["company_code", "currency"])["score"]
+        .rank(method="average", pct=True)
+        .mul(100)
+    )
+
 #Construção dos candidatos
 def build_alert_candidates(materiality, stability):
 
@@ -118,14 +210,8 @@ def build_alert_candidates(materiality, stability):
         raise ValueError("Existem registros sem dados de estabilidade.")
 
     #Percentil técnico baseado no anomaly_score
-    result[
-        "anomaly_score_percentile"
-    ] = (
-        result["anomaly_score"].rank(
-            method="average",
-            pct=True
-        )
-        * 100
+    result["anomaly_score_percentile"] = (
+        calculate_grouped_anomaly_percentile(result)
     )
 
     #Percentual de execuções em que o registro foi marcado como anômalo
@@ -157,13 +243,17 @@ def build_alert_candidates(materiality, stability):
             "anomaly_score_percentile",
             "stability_rate",
             "materiality_percentile",
-            "anomaly_score"
+            "anomaly_rank",
+            "company_code",
+            "currency",
         ],
-        ascending = [
+        ascending=[
             False,
             False,
             False,
-            False
+            True,
+            True,
+            True,
         ],
     )
 

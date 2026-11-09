@@ -153,8 +153,58 @@ def build_validation_dataset(alert_candidates, ml_features):
         currency_context,
         on=IDENTITY_COLUMNS,
         how="left",
-        validate="one_to_one"
+        validate="one_to_one",
+        suffixes=("", "_features"),
     )
+
+    for column in ("currency", "currency_type"):
+        context_column = f"{column}_features"
+
+        if context_column not in result.columns:
+            continue
+
+        if column == "currency":
+            candidate_value = (
+                result[column]
+                .astype("string")
+                .str.strip()
+                .str.upper()
+            )
+
+            context_value = (
+                result[context_column]
+                .astype("string")
+                .str.strip()
+                .str.upper()
+            )
+        else:
+            candidate_value = pd.to_numeric(
+                result[column],
+                errors="coerce",
+            )
+
+            context_value = pd.to_numeric(
+                result[context_column],
+                errors="coerce",
+            )
+
+        inconsistent = (
+            candidate_value.isna()
+            | context_value.isna()
+            | candidate_value.ne(
+                context_value
+            ).fillna(True)
+        )
+
+        if inconsistent.any():
+            raise ValueError(
+                f"Inconsistent {column} between "
+                "candidates and ML features"
+            )
+
+        result = result.drop(
+            columns=[context_column]
+        )
 
     #Normalização do currency_type
     currency_type_numeric = pd.to_numeric(

@@ -2,8 +2,20 @@ from pathlib import Path
 
 import pandas as pd
 
+import json
+
+from src.privacy.validate_protected_dataset import (
+    validate_protected_dataset,
+)
+
 #Configurações
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+PRIVACY_POLICY_FILE = (
+    PROJECT_ROOT
+    / "config"
+    / "ke24_privacy_policy.json"
+)
 
 INPUT_FILE = (
     PROJECT_ROOT
@@ -56,6 +68,20 @@ def validate_input_data(df):
 
     if df.columns.duplicated().any():
         raise ValueError("Existem colunas duplicadas no staging")
+    
+    # Valida a proteção dos identificadores antes de permitir o processamento da KE24
+    with PRIVACY_POLICY_FILE.open(
+        "r",
+        encoding="utf-8"
+    ) as file:
+        privacy_policy = json.load(file)
+
+    validate_protected_dataset(
+        df,
+        privacy_policy,
+        require_all_columns=True,
+    )
+
 
 #Padronização das medidas financeiras
 def standardize_measure_types(df):
