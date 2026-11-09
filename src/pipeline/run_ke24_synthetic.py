@@ -50,7 +50,7 @@ HISTORY_FILE = (
     PROJECT_ROOT
     / "data"
     / "curated"
-    / "ke24_alert_history_synthetic.csv"
+    / "ke24_alert_history_synthetic_grouped_v1.csv"
 )
 
 # Chave fixa exclusivamente para dados fictícios.
@@ -101,7 +101,7 @@ def generate_synthetic_data(schema):
         record.update({
             "company_code": company,
             "currency_type": 10,
-            "currency": "BRL",
+            "currency": "BRL" if company == "COMP_A" else "USD",
             "period": period,
             "period_year": f"{period:02d}.2026",
             "profit_center": f"CENTRO_{company}",
@@ -128,7 +128,7 @@ def build_synthetic_rules():
         "currency_basis": {"currency_type": 10},
         "business_thresholds_by_company": {
             company: {
-                "currency": "BRL",
+                "currency": "BRL" if company == "COMP_A" else "USD",
                 "materiality_medium_min": 100.0,
                 "materiality_high_min": 300.0,
             }
@@ -219,8 +219,10 @@ def run_pipeline():
 
     detection.validate_inputs(matrix, ml_features)
 
-    model = detection.train_isolation_forest(matrix)
-    scores = detection.build_anomaly_scores(model, matrix)
+    scores = detection.build_grouped_anomaly_scores(
+        matrix,
+        ml_features,
+    )
 
     anomaly_results = detection.build_results(
         ml_features, scores
@@ -244,25 +246,10 @@ def run_pipeline():
 
     # 6. Estabilidade
     # Arquivos temporários exclusivos da execução sintética
-    with tempfile.TemporaryDirectory() as folder:
-        directory = Path(folder)
-
-        matrix_file = directory / "matrix.parquet"
-        features_file = directory / "features.parquet"
-        stability_file = directory / "stability.csv"
-
-        matrix.to_parquet(matrix_file, index=False)
-        ml_features.to_parquet(features_file, index=False)
-
-        with (
-            patch.object(stability, "TRAINING_FILE", matrix_file),
-            patch.object(stability, "CONTEXT_FILE", features_file),
-            patch.object(stability, "OUTPUT_FILE", stability_file),
-            redirect_stdout(io.StringIO()),
-        ):
-            stability.main()
-
-        stability_result = pd.read_csv(stability_file)
+    stability_result = stability.build_grouped_stability(
+        matrix,
+        ml_features,
+    )
 
     print("5. Materialidade e estabilidade calculadas")
 
