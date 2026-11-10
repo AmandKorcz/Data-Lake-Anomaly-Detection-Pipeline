@@ -18,6 +18,10 @@ def make_candidates():
             "TKN_" + "c" * 32,
             "TKN_" + "c" * 32,
         ],
+        "_source_file_sha256": [
+            "TKN_" + "f" * 32,
+            "TKN_" + "f" * 32,
+        ],
         "_source_row_number": [2, 3],
         "company_code": [COMP_A, COMP_B],
         "currency": ["BRL", "USD"],

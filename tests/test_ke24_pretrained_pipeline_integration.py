@@ -38,6 +38,16 @@ from src.pipeline.run_ke24_pretrained_inference import (
     execute_pretrained_pipeline_to_files,
 )
 
+from src.privacy.anonymize_ke24 import (
+    anonymize_ke24_dataframe,
+)
+
+from src.processing import prepare_ke24_processed as processing
+
+from src.pipeline.run_ke24_pretrained_inference import (
+    execute_pretrained_pipeline_from_processed,
+)
+
 
 class TestKE24PretrainedPipelineIntegration(unittest.TestCase):
 
@@ -77,6 +87,27 @@ class TestKE24PretrainedPipelineIntegration(unittest.TestCase):
             cls.policy,
         )
 
+        protected_test = anonymize_ke24_dataframe(
+            raw_test,
+            cls.policy,
+            schema,
+            TEST_KEY,
+        )
+
+        processed_test, _ = (
+            processing.standardize_measure_types(
+                protected_test.copy()
+            )
+        )
+
+        processed_test = processing.add_period_key(
+            processed_test
+        )
+
+        cls.new_processed = processing.sort_processed_data(
+            processed_test
+        )
+
         cls.feature_manifest = manifest
 
         selected = training.get_selected_features(
@@ -93,6 +124,9 @@ class TestKE24PretrainedPipelineIntegration(unittest.TestCase):
         ]
 
         matrix = matrix[feature_columns]
+
+        cls.training_matrix = matrix
+        cls.training_context = train_features
 
         cls.versions = {}
         cls.trained_models = {}
@@ -323,6 +357,70 @@ class TestKE24PretrainedPipelineIntegration(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             self.execute(new_features=modified)
+
+            
+    def test_different_training_history_is_rejected(self):
+        modified_matrix = self.training_matrix.copy()
+
+        column = modified_matrix.columns[0]
+
+        modified_matrix.loc[
+            modified_matrix.index[0],
+            column,
+        ] += 100.0
+
+        different_model = runtime.train_grouped_models(
+            modified_matrix,
+            self.training_context,
+            random_state=7,
+        )
+
+        self.assertNotEqual(
+            different_model.training_fingerprint,
+            self.trained_models[42].training_fingerprint,
+        )
+
+        version = "different-history-seed-7"
+
+        save_model_bundle(
+            different_model,
+            self.model_root,
+            version,
+        )
+
+        versions = dict(self.versions)
+        versions[7] = version
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Stability models use different training datasets",
+        ):
+            self.execute(versions=versions)
+
+    
+    def test_processed_input_uses_training_features(self):
+        result = execute_pretrained_pipeline_from_processed(
+            self.new_processed,
+            self.feature_manifest,
+            self.model_root,
+            self.versions,
+            self.rules,
+            self.policy,
+        )
+
+        self.assertEqual(result["scored_count"], 40)
+
+        original = self.execute()
+
+        self.assertEqual(
+            result["candidate_count"],
+            original["candidate_count"],
+        )
+
+        self.assertEqual(
+            len(result["dashboard"]),
+            len(original["dashboard"]),
+        )
 
 
 if __name__ == "__main__":

@@ -282,6 +282,37 @@ class TestKE24ModelStore(unittest.TestCase):
                 self.version,
             )
 
+    
+    def test_modified_training_fingerprint_is_rejected(self):
+        directory = self.save()
+
+        manifest_path = directory / store.MANIFEST_FILE
+
+        manifest = json.loads(
+            manifest_path.read_text(encoding="utf-8")
+        )
+
+        original = manifest["training_fingerprint"]
+
+        manifest["training_fingerprint"] = (
+            "0" * 64 if original != "0" * 64
+            else "1" * 64
+        )
+
+        manifest_path.write_text(
+            json.dumps(manifest),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Stored training fingerprint mismatch",
+        ):
+            store.load_model_bundle(
+                self.root,
+                self.version,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

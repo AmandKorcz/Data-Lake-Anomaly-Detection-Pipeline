@@ -5,13 +5,13 @@ from src.ml.ke24_model_store import validate_version
 
 from src.ml.evaluate_ke24_isolation_forest_stability import RANDOM_STATES
 
-IDENTITY_COLUMNS = [
-    "_source_file",
-    "_source_row_number",
-]
+from src.ml.ke24_record_identity import (
+    IDENTITY_COLUMNS,
+    validate_record_identity,
+)
+
 
 REQUIRED_COLUMNS = IDENTITY_COLUMNS + [
-    "company_code",
     "currency",
     "currency_type",
     "anomaly_score",
@@ -45,10 +45,7 @@ def validate_pretrained_materiality(dataset):
             + ", ".join(missing)
         )
 
-    if dataset.duplicated(
-        subset=IDENTITY_COLUMNS
-    ).any():
-        raise ValueError("Duplicate source records")
+    validate_record_identity(dataset)
 
     if not (
         pd.api.types.is_bool_dtype(
@@ -194,7 +191,6 @@ def attach_pretrained_stability(candidates, stability):
     identity = IDENTITY_COLUMNS
 
     context_columns = [
-        "company_code",
         "currency",
         "currency_type",
     ]
@@ -242,11 +238,12 @@ def attach_pretrained_stability(candidates, stability):
             + str(missing_candidates + missing_stability)
         )
 
-    if candidates.duplicated(subset=identity).any():
-        raise ValueError("Duplicate candidates")
+    validate_record_identity(
+        candidates,
+        allow_empty=True,
+    )
 
-    if stability.duplicated(subset=identity).any():
-        raise ValueError("Duplicate stability records")
+    validate_record_identity(stability)
 
     if set(stability_columns + flag_columns).intersection(
         candidates.columns
@@ -292,7 +289,7 @@ def attach_pretrained_stability(candidates, stability):
     if result["mean_anomaly_score"].isna().any():
         raise ValueError("Stability row not found")
 
-    for col in ("company_code", "currency"):
+    for col in ("currency",):
         expected = result[col].astype("string")
         observed = result[
             f"_stability_{col}"

@@ -22,7 +22,7 @@ from src.ml.ke24_grouped_model_runtime import (
 
 MODEL_FILE = "model.joblib"
 MANIFEST_FILE = "manifest.json"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 
 def validate_version(version):
@@ -61,6 +61,19 @@ def validate_bundle(bundle):
         )
     ):
         raise ValueError("Invalid feature contract")
+
+    fingerprint = bundle.training_fingerprint
+
+    if (
+        not isinstance(fingerprint, str)
+        or not re.fullmatch(
+            r"[0-9a-f]{64}",
+            fingerprint,
+        )
+    ):
+        raise ValueError(
+            "Invalid training fingerprint"
+        )
 
     keys = set(bundle.models)
 
@@ -152,6 +165,9 @@ def save_model_bundle(bundle, root, version):
             "model_sha256": calculate_sha256(
                 model_path
             ),
+            "training_fingerprint": (
+                bundle.training_fingerprint
+            ),
         }
 
         (temporary / MANIFEST_FILE).write_text(
@@ -222,6 +238,13 @@ def load_model_bundle(root, version):
     bundle = joblib.load(model_path)
 
     validate_bundle(bundle)
+
+    if manifest.get("training_fingerprint") != (
+        bundle.training_fingerprint
+    ):
+        raise ValueError(
+            "Stored training fingerprint mismatch"
+        )
 
     if tuple(manifest["feature_columns"]) != (
         bundle.feature_columns

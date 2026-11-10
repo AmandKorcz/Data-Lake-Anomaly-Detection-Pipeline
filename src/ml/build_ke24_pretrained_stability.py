@@ -8,18 +8,18 @@ from src.ml.ke24_grouped_model_runtime import (
     score_new_records,
 )
 
+from src.ml.ke24_record_identity import (
+    IDENTITY_COLUMNS,
+    validate_record_identity,
+)
 
-IDENTITY_COLUMNS = [
+CONTEXT_COLUMNS = [
     "_source_file",
-    "_source_row_number",
-]
-
-CONTEXT_COLUMNS = IDENTITY_COLUMNS + [
+    *IDENTITY_COLUMNS,
     "period_key",
     "profit_center",
     "product",
     "reference_document",
-    "company_code",
     "currency",
     "currency_type",
 ]
@@ -54,10 +54,7 @@ def build_pretrained_stability(
 
     context = new_context.reset_index(drop=True)
 
-    if context.duplicated(
-        subset=IDENTITY_COLUMNS
-    ).any():
-        raise ValueError("Duplicate record identities")
+    validate_record_identity(context)
 
     result = context[CONTEXT_COLUMNS].copy()
 

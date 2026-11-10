@@ -1,6 +1,3 @@
-import os
-import tempfile
-
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,6 +37,14 @@ from src.alerts.build_ke24_pretrained_outputs import (
     build_pretrained_outputs,
 )
 
+from src.features.build_ke24_pretrained_inference_features import (
+    build_pretrained_inference_features,
+)
+
+from src.alerts.ke24_pretrained_csv_transaction import (
+    locked_pretrained_csv_pair,
+    _publish_pretrained_csv_pair_locked,
+)
 
 def load_stability_model_versions(model_root, versions):
     if (
@@ -69,6 +74,18 @@ def load_stability_model_versions(model_root, versions):
 
     primary = models[42]
 
+    # All five models must use the same training dataset.
+    fingerprints = {
+        manifest.get("training_fingerprint")
+        for manifest in manifests.values()
+    }
+
+    if len(fingerprints) != 1:
+        raise ValueError(
+            "Stability models use different training datasets"
+        )
+
+    # Validate feature and group compatibility.
     for seed, bundle in models.items():
         if (
             bundle.feature_columns != primary.feature_columns
@@ -192,32 +209,35 @@ def execute_pretrained_pipeline(
         "dashboard": dashboard,
     }
 
-
-def _stage_csv(dataset, destination):
-    destination.parent.mkdir(
-        parents=True,
-        exist_ok=True,
+def execute_pretrained_pipeline_from_processed(
+    processed,
+    feature_manifest,
+    model_root,
+    versions,
+    protected_rules,
+    privacy_policy,
+    previous_history=None,
+    detected_at_utc=None,
+):
+    prepared_features = (
+        build_pretrained_inference_features(
+            processed,
+            feature_manifest,
+            privacy_policy,
+        )
     )
 
-    descriptor, temporary = tempfile.mkstemp(
-        prefix=".ke24_",
-        suffix=".csv",
-        dir=destination.parent,
+    return execute_pretrained_pipeline(
+        prepared_features,
+        feature_manifest,
+        model_root,
+        versions,
+        protected_rules,
+        privacy_policy,
+        previous_history=previous_history,
+        detected_at_utc=detected_at_utc,
     )
 
-    try:
-        with os.fdopen(
-            descriptor,
-            "w",
-            encoding="utf-8-sig",
-            newline="",
-        ) as file:
-            dataset.to_csv(file, index=False)
-    except Exception:
-        Path(temporary).unlink(missing_ok=True)
-        raise
-
-    return Path(temporary)
 
 
 def execute_pretrained_pipeline_to_files(
@@ -238,45 +258,34 @@ def execute_pretrained_pipeline_to_files(
             "History and dashboard paths must differ"
         )
 
-    if history_path.exists():
-        previous = pd.read_csv(
-            history_path,
-            encoding="utf-8-sig",
+    # Lock both outputs and recover any pending transaction.
+    with locked_pretrained_csv_pair(
+        history_path,
+        dashboard_path,
+    ):
+        if history_path.exists():
+            previous = pd.read_csv(
+                history_path,
+                encoding="utf-8-sig",
+            )
+        else:
+            previous = None
+
+        result = execute_pretrained_pipeline(
+            new_features,
+            feature_manifest,
+            model_root,
+            versions,
+            protected_rules,
+            privacy_policy,
+            previous_history=previous,
         )
-    else:
-        previous = None
 
-    result = execute_pretrained_pipeline(
-        new_features,
-        feature_manifest,
-        model_root,
-        versions,
-        protected_rules,
-        privacy_policy,
-        previous_history=previous,
-    )
-
-    staged = []
-
-    try:
-        staged_history = _stage_csv(
+        _publish_pretrained_csv_pair_locked(
             result["history"],
-            history_path,
-        )
-        staged.append(staged_history)
-
-        staged_dashboard = _stage_csv(
             result["dashboard"],
+            history_path,
             dashboard_path,
         )
-        staged.append(staged_dashboard)
-
-        # Individual atomic replacements.
-        os.replace(staged_history, history_path)
-        os.replace(staged_dashboard, dashboard_path)
-
-    finally:
-        for temporary in staged:
-            temporary.unlink(missing_ok=True)
 
     return result

@@ -151,6 +151,7 @@ class TestKE24PretrainedAlertCandidates(unittest.TestCase):
 
         self.assertTrue(candidates.empty)
 
+    
     def test_selection_is_order_independent(self):
         original = build_pretrained_alert_candidates(
             self.profiled
@@ -166,8 +167,9 @@ class TestKE24PretrainedAlertCandidates(unittest.TestCase):
         )
 
         identity = [
-            "_source_file",
+            "_source_file_sha256",
             "_source_row_number",
+            "company_code",
         ]
 
         self.assertEqual(
@@ -221,17 +223,18 @@ class TestKE24PretrainedAlertCandidates(unittest.TestCase):
     def test_duplicate_records_are_rejected(self):
         modified = self.profiled.copy()
 
-        modified.loc[1, "_source_file"] = (
-            modified.loc[0, "_source_file"]
-        )
-
-        modified.loc[1, "_source_row_number"] = (
-            modified.loc[0, "_source_row_number"]
-        )
+        for column in (
+            "_source_file_sha256",
+            "_source_row_number",
+            "company_code",
+        ):
+            modified.loc[1, column] = (
+                modified.loc[0, column]
+            )
 
         with self.assertRaisesRegex(
             ValueError,
-            "Duplicate source records",
+            "Duplicate record identities",
         ):
             build_pretrained_alert_candidates(modified)
 

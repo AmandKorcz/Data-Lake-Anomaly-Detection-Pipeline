@@ -7,6 +7,10 @@ from src.ml.train_ke24_isolation_forest import (
     build_grouped_anomaly_scores,
 )
 
+from src.ml.ke24_record_identity import (
+    validate_record_identity,
+)
+
 #Configurações
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -40,6 +44,7 @@ TOP_N = 10
 def build_grouped_stability(training_matrix, context):
     result_columns = [
         "_source_file",
+        "_source_file_sha256",
         "_source_row_number",
         "period_key",
         "profit_center",
@@ -61,13 +66,7 @@ def build_grouped_stability(training_matrix, context):
             f"Missing stability context: {missing}"
         )
 
-    identity = [
-        "_source_file",
-        "_source_row_number",
-    ]
-
-    if context.duplicated(subset=identity).any():
-        raise ValueError("Duplicate record identities")
+    validate_record_identity(context)
 
     result = (
         context[result_columns]
@@ -154,14 +153,18 @@ def main():
     if len(training_matrix) != len(context):
         raise ValueError("A matriz de treinamento e o dataser de contexto possuem quantidades diferentes de registros.")
 
+    validate_record_identity(context)
+
     result = context[
         [
             "_source_file",
+            "_source_file_sha256",
             "_source_row_number",
+            "company_code",
             "period_key",
             "profit_center",
             "product",
-            "reference_document"
+            "reference_document",
         ]
     ].copy()
 

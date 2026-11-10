@@ -4,6 +4,11 @@ import pandas as pd
 
 import numpy as np
 
+from src.ml.ke24_record_identity import (
+    IDENTITY_COLUMNS,
+    validate_record_identity,
+)
+
 #Configurações
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,10 +33,6 @@ OUTPUT_FILE = (
     / "ke24_alert_candidates.csv"
 )
 
-IDENTITY_COLUMNS = [
-    "_source_file",
-    "_source_row_number"
-]
 
 #Threshold técnico experimental
 EXPERIMETAL_ANOMALY_PERCENTILE_MIN = 95.0
@@ -93,11 +94,8 @@ def validate_inputs(materiality, stability):
             +", ".join(missing_stability)
         )
 
-    if materiality.duplicated(subset=IDENTITY_COLUMNS).any():
-        raise ValueError("Existem registros duplicados na análise de materialidade.")
-
-    if stability.duplicated(subset=IDENTITY_COLUMNS).any():
-        raise ValueError("Existem registros duplicados na análise de estabildiade.")
+    validate_record_identity(materiality)
+    validate_record_identity(stability)
 
 
 def calculate_grouped_anomaly_percentile(
@@ -188,6 +186,8 @@ def calculate_grouped_anomaly_percentile(
 
 #Construção dos candidatos
 def build_alert_candidates(materiality, stability):
+
+    validate_inputs(materiality, stability)
 
     stability_columns = (
         IDENTITY_COLUMNS

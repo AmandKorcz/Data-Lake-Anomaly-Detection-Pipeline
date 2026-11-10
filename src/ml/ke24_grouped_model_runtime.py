@@ -6,6 +6,9 @@ import pandas as pd
 from src.ml import train_ke24_isolation_forest as detection
 from src.ml import prepare_ke24_training_matrix as training
 
+from src.ml.ke24_training_fingerprint import (
+    compute_training_fingerprint,
+)
 
 GROUP_COLUMNS = ["company_code", "currency"]
 REFERENCE_PERCENTILE = 95.0
@@ -17,6 +20,7 @@ class GroupedModels:
     models: dict
     thresholds: dict
     group_sizes: dict
+    training_fingerprint: str
 
 
 def validate_model_data(matrix, context):
@@ -82,6 +86,11 @@ def train_grouped_models(
         training_context,
     )
 
+    training_fingerprint = compute_training_fingerprint(
+        matrix,
+        training_context,
+    )
+
     models = {}
     thresholds = {}
     group_sizes = {}
@@ -124,6 +133,7 @@ def train_grouped_models(
         models=models,
         thresholds=thresholds,
         group_sizes=group_sizes,
+        training_fingerprint=training_fingerprint,
     )
 
 
