@@ -7,6 +7,9 @@ from src.privacy.validate_protected_dataset import (
     validate_protected_dataset,
 )
 
+from src.ml.prepare_ke24_training_matrix import split_temporal_by_group
+
+
 #Configurações
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -258,18 +261,36 @@ def main():
             +", ".join(missing_context)
         )
 
-    measure_columns = (get_measure_columns(df))
+    # Identifica todas as medidas financeiras
+    measure_columns = get_measure_columns(df)
 
-    measures = (prepare_measure_matrix(df, measure_columns))
+    # Separa os períodos de treinamento e validação
+    train_df, validation_df = split_temporal_by_group(df)
 
-    (
-        active_measures,
-        inactive_measures
-    ) = select_active_measures(
-        measures
+    # Prepara as medidas utilizando apenas o treinamento
+    train_measures = prepare_measure_matrix(
+        train_df,
+        measure_columns
     )
 
-    engineered_features = (build_engineered_features(measures))
+    # Seleciona medidas ativas somente no treinamento
+    active_measures, inactive_measures = select_active_measures(
+        train_measures
+    )
+
+    # Prepara os dados completos para gerar as features
+    # A validação continua disponível, mas não participa da seleção
+    measures = prepare_measure_matrix(
+        df,
+        measure_columns
+    )
+
+    # Features derivadas são calculadas por registro
+    engineered_features = build_engineered_features(measures)
+
+    print(f"Registros de treinamento: {len(train_df):,}")
+    print(f"Registros de validacao: {len(validation_df):,}")
+
 
     model_measures = (
         measures[active_measures].copy()

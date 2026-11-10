@@ -147,10 +147,12 @@ def add_period_key(df):
         .str.strip()
     )
 
+    # Aceita períodos com 1, 2 ou 3 dígitos.
+    # Exemplos: 1.2026, 01.2026 e 001.2026.
     extracted = period_year_text.str.extract(
-        r"^(?P<source_period>\d{1,2})\.(?P<calendar_year>\d{4})$"
+        r"^(?P<source_period>\d{1,3})\.(?P<calendar_year>\d{4})$"
     )
-
+    
     if extracted["calendar_year"].isna().any():
         invalid_examples = (
             period_year_text[extracted["calendar_year"].isna()]

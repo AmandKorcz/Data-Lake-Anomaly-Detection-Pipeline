@@ -34,6 +34,22 @@ CONTEXT_FILE = (
     / "ke24_ml_features.parquet"
 )
 
+# Contexto exclusivo dos dados de treinamento temporal
+TEMPORAL_CONTEXT_FILE = (
+    PROJECT_ROOT
+    / "data"
+    / "curated"
+    / "ke24_training_context.parquet"
+)
+
+# Diretório dos modelos treinados com dados reais
+TEMPORAL_MODEL_DIR = (
+    PROJECT_ROOT
+    / "data"
+    / "models"
+    / "ke24_temporal"
+)
+
 OUTPUT_FILE = (
     PROJECT_ROOT
     / "data"
@@ -385,5 +401,110 @@ def main():
     print(OUTPUT_FILE)
     print(OUTPUT_CSV)
 
+    
+# Treinamento temporal com dados reais da KE24
+def main_temporal_grouped(random_state=42):
+    from src.ml.ke24_grouped_model_runtime import (
+        train_grouped_models,
+    )
+
+    from src.ml.ke24_model_store import (
+        save_model_bundle,
+    )
+
+    # Sementes utilizadas na avaliação de estabilidade
+    allowed_seeds = (7, 21, 42, 84, 123)
+
+    if random_state not in allowed_seeds:
+        raise ValueError(
+            "Semente invalida para o treinamento temporal."
+        )
+
+    print("\nKE24 - Treinamento Temporal do Isolation Forest\n")
+
+    # Verifica os arquivos de treinamento
+    if not TRAINING_FILE.is_file():
+        raise FileNotFoundError(
+            "Matriz de treinamento nao encontrada."
+        )
+
+    if not TEMPORAL_CONTEXT_FILE.is_file():
+        raise FileNotFoundError(
+            "Contexto de treinamento nao encontrado."
+        )
+
+    # Carrega somente os registros de treinamento
+    matrix = pd.read_parquet(TRAINING_FILE)
+    context = pd.read_parquet(TEMPORAL_CONTEXT_FILE)
+
+    # Garante que matriz e contexto estejam alinhados
+    if len(matrix) != len(context):
+        raise ValueError(
+            "Matriz e contexto possuem quantidades diferentes."
+        )
+
+    if len(matrix) != 46684:
+        raise ValueError(
+            "Quantidade de treinamento diferente "
+            "da divisao temporal validada."
+        )
+
+    print(f"Registros de treinamento: {len(matrix):,}")
+    print(f"Features utilizadas: {len(matrix.columns)}")
+
+    version = f"ke24_real_temporal_s{random_state}"
+
+    if (TEMPORAL_MODEL_DIR / version).exists():
+        raise FileExistsError(
+            "Esta versao do modelo ja foi salva."
+        )
+
+    # Treina modelos separados por empresa e moeda
+    bundle = train_grouped_models(
+        training_matrix=matrix,
+        training_context=context,
+        min_group_size=20,
+        random_state=random_state,
+    )
+
+    print(f"Grupos treinados: {len(bundle.models)}")
+
+    # Salva os modelos e seus manifestos
+    destination = save_model_bundle(
+        bundle,
+        TEMPORAL_MODEL_DIR,
+        version,
+    )
+
+    print("\nTreinamento concluido com sucesso!")
+    print(f"Versao: {version}")
+    print(f"Modelos salvos em: {destination}")
+
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+
+    args = sys.argv[1:]
+
+    if not args:
+        main()
+
+    elif args == ["--temporal"]:
+        main_temporal_grouped()
+
+    elif (
+        len(args) == 2
+        and args[0] == "--temporal"
+        and args[1] in {"7", "21", "42", "84", "123"}
+    ):
+        main_temporal_grouped(
+            random_state=int(args[1])
+        )
+
+    else:
+        raise SystemExit(
+            "Uso: python -m src.ml.train_ke24_isolation_forest "
+            "[--temporal [7|21|42|84|123]]"
+        )
+
