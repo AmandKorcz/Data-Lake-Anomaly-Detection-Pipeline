@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import numpy as np
 
 #Configurações
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -83,11 +84,12 @@ def validate_inputs(ml_features, anomaly_results, financial_features):
 
     required_feature_columns = (
         IDENTITY_COLUMNS
+        + ["currency", "currency_type"]
         + financial_features
         + [
             "total_signed_value",
             "total_absolute_value",
-            "max_absolute_value"
+            "max_absolute_value",
         ]
     )
 
@@ -129,11 +131,12 @@ def validate_inputs(ml_features, anomaly_results, financial_features):
 def build_materiality_dataset(ml_features, anomaly_results, financial_features):
     feature_columns = (
         IDENTITY_COLUMNS
+        + ["currency", "currency_type"]
         + financial_features
         + [
             "total_signed_value",
             "total_absolute_value",
-            "max_absolute_value"
+            "max_absolute_value",
         ]
     )
 
@@ -205,20 +208,92 @@ def build_materiality_dataset(ml_features, anomaly_results, financial_features):
         "dominant_measure_value"
     ] = 0.0
 
-    result[
-        "materiality_percentile"
-    ] = (
-        result[
-            "total_absolute_value"
-        ]
-        .rank(
-            method="average",
-            pct=True,
-        )
-        * 100
+    result["materiality_percentile"] = (
+        calculate_materiality_percentile(result)
     )
 
     return result
+
+
+def calculate_materiality_percentile(dataset):
+    required = {
+        "company_code",
+        "currency",
+        "currency_type",
+        "total_absolute_value",
+    }
+
+    missing = required - set(dataset.columns)
+
+    if missing:
+        raise ValueError(
+            f"Missing materiality fields: {sorted(missing)}"
+        )
+
+    companies = (
+        dataset["company_code"]
+        .astype("string")
+        .str.strip()
+    )
+
+    currencies = (
+        dataset["currency"]
+        .astype("string")
+        .str.strip()
+        .str.upper()
+    )
+
+    currency_types = pd.to_numeric(
+        dataset["currency_type"],
+        errors="coerce",
+    )
+
+    amounts = pd.to_numeric(
+        dataset["total_absolute_value"],
+        errors="coerce",
+    )
+
+    if (
+        companies.isna().any()
+        or companies.eq("").any()
+    ):
+        raise ValueError("Invalid company_code")
+
+    valid_currencies = (
+        currencies.str.fullmatch(r"[A-Z]{3}")
+        .fillna(False)
+    )
+
+    if not valid_currencies.all():
+        raise ValueError("Invalid currency")
+
+    if (
+        currency_types.isna().any()
+        or not currency_types.eq(10).all()
+    ):
+        raise ValueError("Expected currency_type 10")
+
+    if (
+        amounts.isna().any()
+        or not amounts.ge(0).all()
+        or not np.isfinite(
+            amounts.to_numpy(dtype=float)
+        ).all()
+    ):
+        raise ValueError("Invalid materiality amounts")
+
+    grouped_data = pd.DataFrame({
+        "company_code": companies,
+        "currency": currencies,
+        "amount": amounts,
+    }, index=dataset.index)
+
+    return (
+        grouped_data
+        .groupby(["company_code", "currency"])["amount"]
+        .rank(method="average", pct=True)
+        .mul(100)
+    )
 
 #Perfil da materialidade
 def print_materiality_profile(result):

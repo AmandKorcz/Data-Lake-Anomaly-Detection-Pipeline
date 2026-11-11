@@ -3,6 +3,14 @@ from pathlib import Path
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 
+from src.ml.train_ke24_isolation_forest import (
+    build_grouped_anomaly_scores,
+)
+
+from src.ml.ke24_record_identity import (
+    validate_record_identity,
+)
+
 #Configurações
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,6 +41,98 @@ RANDOM_STATES = [
 
 TOP_N = 10
 
+def build_grouped_stability(training_matrix, context):
+    result_columns = [
+        "_source_file",
+        "_source_file_sha256",
+        "_source_row_number",
+        "period_key",
+        "profit_center",
+        "product",
+        "reference_document",
+        "company_code",
+        "currency",
+        "currency_type",
+    ]
+
+    missing = [
+        column
+        for column in result_columns
+        if column not in context.columns
+    ]
+
+    if missing:
+        raise ValueError(
+            f"Missing stability context: {missing}"
+        )
+
+    validate_record_identity(context)
+
+    result = (
+        context[result_columns]
+        .reset_index(drop=True)
+        .copy()
+    )
+
+    score_columns = []
+    flag_columns = []
+    rank_columns = []
+
+    for random_state in RANDOM_STATES:
+        scores = build_grouped_anomaly_scores(
+            training_matrix,
+            context,
+            random_state=random_state,
+        )
+
+        score_column = f"score_seed_{random_state}"
+        flag_column = f"flag_seed_{random_state}"
+        rank_column = f"rank_seed_{random_state}"
+
+        result[score_column] = (
+            scores["anomaly_score"].to_numpy()
+        )
+
+        result[flag_column] = (
+            scores["anomaly_flag"].to_numpy()
+        )
+
+        result[rank_column] = (
+            scores["anomaly_rank"].to_numpy()
+        )
+
+        score_columns.append(score_column)
+        flag_columns.append(flag_column)
+        rank_columns.append(rank_column)
+
+    result["mean_anomaly_score"] = (
+        result[score_columns].mean(axis=1)
+    )
+
+    result["score_std"] = (
+        result[score_columns].std(axis=1)
+    )
+
+    result["flag_count"] = (
+        result[flag_columns]
+        .sum(axis=1)
+        .astype(int)
+    )
+
+    result["mean_rank"] = (
+        result[rank_columns].mean(axis=1)
+    )
+
+    result["stability_rank"] = (
+        result.groupby(
+            ["company_code", "currency"]
+        )["mean_rank"]
+        .rank(method="first")
+        .astype(int)
+    )
+
+    return result
+
 #Pipeline principal
 def main():
     print("\nKE24 - Avaliação de Estabilidade do Isolation Forest\n")
@@ -53,14 +153,18 @@ def main():
     if len(training_matrix) != len(context):
         raise ValueError("A matriz de treinamento e o dataser de contexto possuem quantidades diferentes de registros.")
 
+    validate_record_identity(context)
+
     result = context[
         [
             "_source_file",
+            "_source_file_sha256",
             "_source_row_number",
+            "company_code",
             "period_key",
             "profit_center",
             "product",
-            "reference_document"
+            "reference_document",
         ]
     ].copy()
 

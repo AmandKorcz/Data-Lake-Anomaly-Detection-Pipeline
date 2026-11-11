@@ -34,6 +34,23 @@ PROFILE_FILE = (
     / "ke24_training_feature_profile.csv"
 )
 
+# Contexto dos registros utilizados no treinamento
+TRAIN_CONTEXT_FILE = (
+    PROJECT_ROOT
+    / "data"
+    / "curated"
+    / "ke24_training_context.parquet"
+)
+
+# Dados reservados para a validação temporal
+VALIDATION_FILE = (
+    PROJECT_ROOT
+    / "data"
+    / "curated"
+    / "ke24_validation_features.parquet"
+)
+
+
 #Seleção das features
 def get_selected_features(manifest):
 
@@ -126,6 +143,72 @@ def build_feature_profile(matrix):
 
     return pd.DataFrame(rows)
 
+
+# Separação temporal entre treinamento e validação
+def split_temporal_by_group(dataset, min_train_records=20):
+    group_columns = ["company_code", "currency"]
+
+    required = set(group_columns + ["period_date"])
+    missing = required - set(dataset.columns)
+
+    if missing:
+        raise ValueError(
+            "Colunas ausentes para divisão temporal: "
+            + ", ".join(sorted(missing))
+        )
+
+    if dataset.empty or dataset[group_columns].isna().any().any():
+        raise ValueError(
+            "Dataset vazio ou grupos sem identificação."
+        )
+
+    dates = pd.to_datetime(
+        dataset["period_date"],
+        errors="raise"
+    )
+
+    if dates.isna().any():
+        raise ValueError("Existem datas de período ausentes.")
+
+    # Identifica o último período de cada empresa/moeda
+    last_dates = (
+        dataset.assign(_split_date=dates)
+        .groupby(group_columns)["_split_date"]
+        .transform("max")
+    )
+
+    # Períodos anteriores: treinamento
+    treino = (
+        dataset.loc[dates.lt(last_dates)]
+        .copy()
+        .reset_index(drop=True)
+    )
+
+    # Último período: validação
+    validacao = (
+        dataset.loc[dates.eq(last_dates)]
+        .copy()
+        .reset_index(drop=True)
+    )
+
+    # Confere se todos os grupos possuem dados suficientes
+    total_grupos = dataset.groupby(group_columns).ngroups
+    treino_por_grupo = treino.groupby(group_columns).size()
+    validacao_por_grupo = validacao.groupby(group_columns).size()
+
+    if (
+        len(treino_por_grupo) != total_grupos
+        or len(validacao_por_grupo) != total_grupos
+        or (treino_por_grupo < min_train_records).any()
+        or (validacao_por_grupo < 1).any()
+        or len(treino) + len(validacao) != len(dataset)
+    ):
+        raise ValueError(
+            "Divisão temporal inviável para um ou mais grupos."
+        )
+
+    return treino, validacao
+
 #Pipeline principal
 def main():
 
@@ -141,15 +224,33 @@ def main():
             f"Manifesto não encontrado: {MANIFEST_FILE}"
         )
 
+    
+    # Carrega o dataset completo e o manifesto de features
     dataset = pd.read_parquet(INPUT_FILE)
+
     manifest = pd.read_csv(
         MANIFEST_FILE,
         encoding="utf-8-sig"
     )
 
-    selected_features = (get_selected_features(manifest))
-    matrix = (build_training_matrix(dataset, selected_features))
-    feature_profile = (build_feature_profile(matrix))
+    # Separa treinamento e validação por período
+    train_df, validation_df = split_temporal_by_group(dataset)
+
+    print(f"Registros de treinamento: {len(train_df):,}")
+    print(f"Registros de validação: {len(validation_df):,}")
+
+    # Recupera as features selecionadas no treinamento
+    selected_features = get_selected_features(manifest)
+
+    # Cria a matriz utilizando somente o treinamento
+    matrix = build_training_matrix(
+        train_df,
+        selected_features
+    )
+
+    # Calcula o perfil apenas sobre os dados de treinamento
+    feature_profile = build_feature_profile(matrix)
+
     constant_features = (feature_profile[
         feature_profile["is_constant"]
     ])
@@ -183,16 +284,44 @@ def main():
         f"\nFeatures finais para treinamento: {len(matrix.columns):,}"
     )
 
+    # Verifica se matriz e contexto possuem a mesma quantidade de registros, preservando o alinhamento entre eles.
+    if len(matrix) != len(train_df):
+        raise ValueError(
+            "A matriz e o contexto de treinamento "
+            "possuem quantidades diferentes de registros."
+        )
+
+    # Salva a matriz numérica para o modelo
     matrix.to_parquet(
         OUTPUT_FILE,
         index=False
     )
 
+    # Salva o contexto correspondente ao treinamento
+    train_df.to_parquet(
+        TRAIN_CONTEXT_FILE,
+        index=False
+    )
+
+    # Reserva os dados do último período de cada grupo
+    validation_df.to_parquet(
+        VALIDATION_FILE,
+        index=False
+    )
+
+    # Salva o perfil das features
     feature_profile.to_csv(
         PROFILE_FILE,
         index=False,
         encoding="utf-8-sig"
     )
+
+    print("\nContexto de treinamento salvo.")
+    print("Registros de treinamento:", len(train_df))
+
+    print("\nConjunto de validação salvo.")
+    print("Registros de validação:", len(validation_df))
+
 
     print("\nMatrix de treinamento gerada em: ")
     print(OUTPUT_FILE)

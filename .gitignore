@@ -38,3 +38,6 @@ data/curated/*
 # OS
 .DS_Store
 Thumbs.db
+
+# Trained ML models - local protected artifacts
+/data/models/

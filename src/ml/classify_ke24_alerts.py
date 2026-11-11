@@ -3,8 +3,20 @@ from pathlib import Path
 import pandas as pd
 from src.ml.load_ke24_alert_rules import load_protected_alert_rules
 
+import json
+
+from src.privacy.validate_protected_dataset import (
+    validate_protected_dataset,
+)
+
 #configuração
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+PRIVACY_POLICY_FILE = (
+    PROJECT_ROOT
+    / "config"
+    / "ke24_privacy_policy.json"
+)
 
 INPUT_FILE = (
     PROJECT_ROOT
@@ -570,24 +582,56 @@ def print_summary(result):
     )
 
 #Pipeline Principal
+
 def main():
 
-    print("\nKE24 - Classificação dos Alertas\n")
+    print("\nKE24 - Classificacao dos Alertas\n")
 
     if not INPUT_FILE.exists():
-        raise FileNotFoundError(F"Dataset de validação não encontrado: {INPUT_FILE}")
+        raise FileNotFoundError(
+            f"Dataset de validacao nao encontrado: {INPUT_FILE}"
+        )
 
     dataset = pd.read_csv(
         INPUT_FILE,
         encoding="utf-8-sig"
     )
 
+    # Valida a estrutura de entrada
+    validate_dataset(dataset)
+
+    with PRIVACY_POLICY_FILE.open(
+        "r",
+        encoding="utf-8"
+    ) as file:
+        privacy_policy = json.load(file)
+
+    # Bloqueia dados antigos sem protecao
+    validate_protected_dataset(
+        dataset,
+        privacy_policy,
+        require_all_columns=False,
+    )
+
+    print("Privacy input validation: OK")
+
     rules = load_rules()
 
-    validate_dataset(dataset)
     validate_currency_basis(dataset, rules)
 
-    result = build_classification(dataset, rules)
+    result = build_classification(
+        dataset,
+        rules,
+    )
+
+    # Confere novamente antes de gravar o CSV
+    validate_protected_dataset(
+        result,
+        privacy_policy,
+        require_all_columns=False,
+    )
+
+    print("Privacy output validation: OK")
 
     result.to_csv(
         OUTPUT_FILE,
@@ -595,10 +639,11 @@ def main():
         encoding="utf-8-sig"
     )
 
-    print(f"Registros processados: {len(result):,}")
+    print(f"Registros classificados: {len(result)}")
+
     print_summary(result)
 
-    print("\nResultado gerado em: ")
+    print("\nResultado gerado em:")
     print(OUTPUT_FILE)
 
 if __name__ == "__main__":

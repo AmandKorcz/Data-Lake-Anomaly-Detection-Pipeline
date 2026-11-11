@@ -1,8 +1,23 @@
 from pathlib import Path
 import pandas as pd
 
+import json
+
+from src.privacy.validate_protected_dataset import (
+    validate_protected_dataset,
+)
+
+from src.ml.prepare_ke24_training_matrix import split_temporal_by_group
+
+
 #Configurações
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+PRIVACY_POLICY_FILE = (
+    PROJECT_ROOT
+    / "config"
+    / "ke24_privacy_policy.json"
+)
 
 INPUT_FILE = (
     PROJECT_ROOT
@@ -71,9 +86,20 @@ def prepare_measure_matrix(df, measure_columns):
             pd.to_numeric,
             errors="coerce"
         )
-        .fillna(0.0)
     )
+
+    invalid_columns = measures.columns[
+        measures.isna().any()
+    ].tolist()
+
+    if invalid_columns:
+        raise ValueError(
+            "Medidas com valores nulos ou não numéricos: "
+            + ", ".join(invalid_columns)
+        )
+
     return measures
+
 
 #Seleção das medidas com movimento
 def select_active_measures(measures):
@@ -96,29 +122,38 @@ def select_active_measures(measures):
 
 #Feature Engeneering
 def build_engineered_features(measures):
-    
+
+    if "sales_quantity" not in measures.columns:
+        raise ValueError(
+            "Coluna sales_quantity não encontrada."
+        )
+
+    # Separa a quantidade das medidas monetárias
+    financial_measures = measures.drop(
+        columns=["sales_quantity"]
+    )
+
+    if financial_measures.shape[1] == 0:
+        raise ValueError(
+            "Nenhuma medida financeira encontrada."
+        )
+
     positive_measure_count = (
-        measures
-        .gt(0)
-        .sum(axis=1)
+        financial_measures.gt(0).sum(axis=1)
     )
 
     negative_measure_count = (
-        measures
-        .lt(0)
-        .sum(axis=1)
+        financial_measures.lt(0).sum(axis=1)
     )
 
     total_signed_value = (
-        measures.sum(axis=1)
+        financial_measures.sum(axis=1)
     )
 
-    absolute_measures = (
-        measures.abs()
-    )
+    absolute_measures = financial_measures.abs()
 
     total_absolute_value = (
-        absolute_measures.sum(axis = 1)
+        absolute_measures.sum(axis=1)
     )
 
     max_absolute_value = (
@@ -146,7 +181,11 @@ def build_feature_manifest(measure_columns, active_measure, engineered_columns):
 
         rows.append({
             "feature": column,
-            "feature_type": "financial_measure",
+            "feature_type": (
+                "quantity_measure"
+                if column == "sales_quantity"
+                else "financial_measure"
+            ),
             "selected_for_model": selected,
             "reason": (
                 "movement_detected"
@@ -188,6 +227,22 @@ def main():
         )
 
     df = pd.read_parquet(INPUT_FILE)
+    
+    # Carrega a política para conferir os identificadores
+    with PRIVACY_POLICY_FILE.open(
+        "r",
+        encoding="utf-8"
+    ) as file:
+        privacy_policy = json.load(file)
+
+    # Impede processamento de datasets sem tokenização
+    validate_protected_dataset(
+        df,
+        privacy_policy,
+        require_all_columns=True,
+    )
+
+    print("Validação de privacidade: APROVADA")
 
     print(
         f"Registros recebidos: "
@@ -206,18 +261,36 @@ def main():
             +", ".join(missing_context)
         )
 
-    measure_columns = (get_measure_columns(df))
+    # Identifica todas as medidas financeiras
+    measure_columns = get_measure_columns(df)
 
-    measures = (prepare_measure_matrix(df, measure_columns))
+    # Separa os períodos de treinamento e validação
+    train_df, validation_df = split_temporal_by_group(df)
 
-    (
-        active_measures,
-        inactive_measures
-    ) = select_active_measures(
-        measures
+    # Prepara as medidas utilizando apenas o treinamento
+    train_measures = prepare_measure_matrix(
+        train_df,
+        measure_columns
     )
 
-    engineered_features = (build_engineered_features(measures))
+    # Seleciona medidas ativas somente no treinamento
+    active_measures, inactive_measures = select_active_measures(
+        train_measures
+    )
+
+    # Prepara os dados completos para gerar as features
+    # A validação continua disponível, mas não participa da seleção
+    measures = prepare_measure_matrix(
+        df,
+        measure_columns
+    )
+
+    # Features derivadas são calculadas por registro
+    engineered_features = build_engineered_features(measures)
+
+    print(f"Registros de treinamento: {len(train_df):,}")
+    print(f"Registros de validacao: {len(validation_df):,}")
+
 
     model_measures = (
         measures[active_measures].copy()

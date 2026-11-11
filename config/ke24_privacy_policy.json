@@ -3,7 +3,7 @@
   "policy_name": "KE24_PRIVACY",
   "policy_version": "0.2",
   "schema_version": "1.1",
-  "status": "DRAFT_REVIEW_REQUIRED",
+  "status": "APPROVED",
 
   "keep_dimensions": [
     "currency_type",

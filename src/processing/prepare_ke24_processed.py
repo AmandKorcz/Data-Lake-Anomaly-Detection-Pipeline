@@ -2,8 +2,20 @@ from pathlib import Path
 
 import pandas as pd
 
+import json
+
+from src.privacy.validate_protected_dataset import (
+    validate_protected_dataset,
+)
+
 #Configurações
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+PRIVACY_POLICY_FILE = (
+    PROJECT_ROOT
+    / "config"
+    / "ke24_privacy_policy.json"
+)
 
 INPUT_FILE = (
     PROJECT_ROOT
@@ -56,6 +68,20 @@ def validate_input_data(df):
 
     if df.columns.duplicated().any():
         raise ValueError("Existem colunas duplicadas no staging")
+    
+    # Valida a proteção dos identificadores antes de permitir o processamento da KE24
+    with PRIVACY_POLICY_FILE.open(
+        "r",
+        encoding="utf-8"
+    ) as file:
+        privacy_policy = json.load(file)
+
+    validate_protected_dataset(
+        df,
+        privacy_policy,
+        require_all_columns=True,
+    )
+
 
 #Padronização das medidas financeiras
 def standardize_measure_types(df):
@@ -121,10 +147,12 @@ def add_period_key(df):
         .str.strip()
     )
 
+    # Aceita períodos com 1, 2 ou 3 dígitos.
+    # Exemplos: 1.2026, 01.2026 e 001.2026.
     extracted = period_year_text.str.extract(
-        r"^(?P<source_period>\d{1,2})\.(?P<calendar_year>\d{4})$"
+        r"^(?P<source_period>\d{1,3})\.(?P<calendar_year>\d{4})$"
     )
-
+    
     if extracted["calendar_year"].isna().any():
         invalid_examples = (
             period_year_text[extracted["calendar_year"].isna()]

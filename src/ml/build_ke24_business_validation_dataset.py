@@ -2,6 +2,11 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.ml.ke24_record_identity import (
+    IDENTITY_COLUMNS,
+    validate_record_identity,
+)
+
 #Configurações
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -26,10 +31,6 @@ OUTPUT_FILE = (
     / "ke24_business_validation.csv"
 )
 
-IDENTITY_COLUMNS = [
-    "_source_file",
-    "_source_row_number"
-]
 
 BUSINESS_VALIDATION_COLUMNS = [
     "review_status",
@@ -100,15 +101,8 @@ def validate_inputs(alert_candidates, ml_features):
             +", ".join(missing_feature_columns)
         )
 
-    if alert_candidates.duplicated(
-        subset=IDENTITY_COLUMNS
-    ).any():
-        raise ValueError("Existem registros duplicados nos candidatos a alerta")
-
-    if ml_features.duplicated(
-        subset=IDENTITY_COLUMNS
-    ).any():
-        raise ValueError("Existem registros duplicados no dataset de features")
+    validate_record_identity(alert_candidates)
+    validate_record_identity(ml_features)
 
 #Recuperação de validações anteriores
 def load_existing_validation():
@@ -131,12 +125,22 @@ def load_existing_validation():
     ]
 
     if missing_columns:
-        return None
+        raise ValueError(
+            "Existing validation has an outdated or incomplete identity/review contract: "
+            + ", ".join(missing_columns)
+        )
+
+    validate_record_identity(
+        existing,
+        allow_empty=True,
+    )
 
     return existing[required_columns].copy()
 
 #Construção do dataset
 def build_validation_dataset(alert_candidates, ml_features):
+
+    validate_inputs(alert_candidates, ml_features)
 
     currency_context = (
         ml_features[
@@ -153,8 +157,58 @@ def build_validation_dataset(alert_candidates, ml_features):
         currency_context,
         on=IDENTITY_COLUMNS,
         how="left",
-        validate="one_to_one"
+        validate="one_to_one",
+        suffixes=("", "_features"),
     )
+
+    for column in ("currency", "currency_type"):
+        context_column = f"{column}_features"
+
+        if context_column not in result.columns:
+            continue
+
+        if column == "currency":
+            candidate_value = (
+                result[column]
+                .astype("string")
+                .str.strip()
+                .str.upper()
+            )
+
+            context_value = (
+                result[context_column]
+                .astype("string")
+                .str.strip()
+                .str.upper()
+            )
+        else:
+            candidate_value = pd.to_numeric(
+                result[column],
+                errors="coerce",
+            )
+
+            context_value = pd.to_numeric(
+                result[context_column],
+                errors="coerce",
+            )
+
+        inconsistent = (
+            candidate_value.isna()
+            | context_value.isna()
+            | candidate_value.ne(
+                context_value
+            ).fillna(True)
+        )
+
+        if inconsistent.any():
+            raise ValueError(
+                f"Inconsistent {column} between "
+                "candidates and ML features"
+            )
+
+        result = result.drop(
+            columns=[context_column]
+        )
 
     #Normalização do currency_type
     currency_type_numeric = pd.to_numeric(
