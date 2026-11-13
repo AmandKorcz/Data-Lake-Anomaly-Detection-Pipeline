@@ -36,16 +36,30 @@ COLUMN_MAPPING_FILE = (
 )
 
 # ------------------------------------ Funções Auxiliares ------------------------------------
-def calculate_file_hash(file_path):
-    #Calcula o hash do arquivo de origem, permitindo a identificação de exatamente qual arquivo foi utilizado em determinada carga
+
+def calculate_file_hash(source):
 
     sha256 = hashlib.sha256()
 
-    with open(file_path, "rb") as file:
-        for block in iter(lambda: file.read(65536), b""):
-            sha256.update(block)
+    if isinstance(source, (str, Path)):
+        with open(source, "rb") as file:
+            for block in iter(lambda: file.read(65536), b""):
+                sha256.update(block)
+
+    else:
+        original_position = source.tell()
+
+        try:
+            source.seek(0)
+
+            for block in iter(lambda: source.read(65536), b""):
+                sha256.update(block)
+
+        finally:
+            source.seek(original_position)
 
     return sha256.hexdigest()
+
 
 def normalize_column_name(column_name):
     # Converte os nomes das colunas da base para compatibilidade com Python e BigQuery.
@@ -228,7 +242,20 @@ def standardize_ke24_types(df):
             
     return df
 
-def process_ke24_file(input_file, expected_columns=None):
+def process_ke24_file(
+    input_file,
+    expected_columns=None,
+    *,
+    source_name=None
+):
+    if isinstance(input_file, (str, Path)):
+        source_name = source_name or Path(input_file).name
+
+    elif not source_name:
+        raise ValueError(
+            "Informe source_name para arquivos em memória."
+        )
+
     print("\n")
     print("Processando extração SAP KE24")
     print("\n")
@@ -239,7 +266,10 @@ def process_ke24_file(input_file, expected_columns=None):
     source_hash = calculate_file_hash(input_file)
 
     print("Identificação e rastreabilidade da carga geradas.")
-   
+
+    if hasattr(input_file, "seek"):
+        input_file.seek(0)
+
     # Leitura inicial apenas dos cabeçalhos
     header_df = pd.read_excel(
         input_file,
@@ -280,9 +310,12 @@ def process_ke24_file(input_file, expected_columns=None):
         dtype=text_columns
     )
 
+    if hasattr(input_file, "seek"):
+        input_file.seek(0)
+
     if df.empty:
         raise ValueError(
-            f"O arquivo '{input_file.name} está vazio"
+            f"O arquivo '{source_name} está vazio"
         )
 
     source_row_count = len(df)
@@ -318,7 +351,7 @@ def process_ke24_file(input_file, expected_columns=None):
 
         if missing_columns or unexpected_columns:
             error_message = (
-                f"O arquivo '{input_file.name}' possui um layout diferente dos demais arquivos"
+                f"O arquivo '{source_name}' possui um layout diferente dos demais arquivos"
             )
 
             if missing_columns:
@@ -337,7 +370,7 @@ def process_ke24_file(input_file, expected_columns=None):
 
     #Mapeamento original -> técnico
     mapping = pd.DataFrame({
-        "source_file": [input_file.name] * len(original_columns),
+        "source_file": [source_name] * len(original_columns),
         "source_column": original_columns,
         "technical_column": normalized_columns
     })
@@ -345,7 +378,7 @@ def process_ke24_file(input_file, expected_columns=None):
     df.columns = normalized_columns
 
     df, summary_rows_removed = remove_summary_rows(
-        df, input_file.name
+        df, source_name
     )
 
     print(
@@ -359,7 +392,7 @@ def process_ke24_file(input_file, expected_columns=None):
         "_load_id": [load_id] * len(df),
         "_source_file_sha256": [source_hash] * len(df),
         "_source_system": ["SAP_KE24"] * len(df),
-        "_source_file": [input_file.name] * len(df),
+        "_source_file": [source_name] * len(df),
         "_source_row_number": range(2, len(df) + 2),
         "_ingested_at_utc": [ingestion_timestamp] * len(df)
     })
@@ -375,7 +408,7 @@ def process_ke24_file(input_file, expected_columns=None):
     # Validação técnica
     if df.columns.duplicated().any():
         raise ValueError(
-            f"O arquivo '{input_file.name}' gerou "
+            f"O arquivo '{source_name}' gerou "
             "nomes de colunas duplicados."
         )
 

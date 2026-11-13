@@ -272,6 +272,27 @@ def validate_processed_data(df, source_row_count):
     if df["period_key"].isna().any():
         raise ValueError("Existem períodos sem period_key")
 
+
+def build_ke24_processed(staging_df):
+
+    validate_input_data(staging_df)
+
+    # Preserva o DataFrame de staging original.
+    df = staging_df.copy()
+
+    df, measure_columns = standardize_measure_types(df)
+
+    df = add_period_key(df)
+
+    df = sort_processed_data(df)
+
+    validate_processed_data(
+        df,
+        source_row_count=len(staging_df)
+    )
+
+    return df, measure_columns
+
 #Pipeline principal 
 def main():
     print("\nKE24 - Camada Processed\n")
@@ -298,19 +319,7 @@ def main():
         f"{source_column_count:,}"
     )
 
-    validate_input_data(df)
-
-    df, measure_columns = (
-        standardize_measure_types(df)
-    )
-
-    df = add_period_key(df)
-    df = sort_processed_data(df)
-
-    validate_processed_data(
-        df,
-        source_row_count
-    )
+    df, measure_columns = build_ke24_processed(df)
 
     OUTPUT_DIR.mkdir(
         parents=True,
