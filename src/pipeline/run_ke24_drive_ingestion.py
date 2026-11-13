@@ -1,5 +1,4 @@
 import pandas as pd
-import json
 
 from googleapiclient.discovery import build
 
@@ -39,23 +38,10 @@ from src.processing.prepare_ke24_processed import (
 
 from io import BytesIO
 
-from src.loading.ke24_drive_manifest import (
-    load_processed_manifest,
-)
-
-from src.loading.ke24_drive_manifest import (
-    load_processed_manifest,
-    serialize_processed_manifest,
-)
-
+from src.loading.ke24_drive_manifest import load_processed_manifest
 from src.loading.ke24_drive_publish import (
     preview_first_publication,
     publish_initial_batch,
-)
-
-from src.loading.ke24_drive_manifest import (
-    load_processed_manifest,
-    serialize_processed_manifest,
 )
 
 import argparse
@@ -130,7 +116,7 @@ def main():
     print(f"Arquivos encontrados: {len(files)}")
 
     dataframes = []
-    expected_columns = None
+    expected_columns = list(schema["columns"])
 
     for index, file in enumerate(files, start=1):
         print(f"\nProcessando arquivo {index}/{len(files)}")
@@ -156,9 +142,6 @@ def main():
             policy,
             require_all_columns=True,
         )
-
-        if expected_columns is None:
-            expected_columns = columns
 
         dataframes.append(protected_df)
 
@@ -259,38 +242,40 @@ def main():
             updated_manifest
         )
 
-        parquet_name = preview_first_publication(
-            service=service,
-            new_manifest=new_manifest,
-            parquet_buffer=parquet_buffer,
-            manifest_bytes=manifest_bytes,
-        )
-
-        if args.publish_initial:
-            if not loaded_manifest.empty:
-                raise RuntimeError(
-                    "A publicação inicial exige manifesto vazio."
-                )
-
-            write_service = build(
-                "drive",
-                "v3",
-                credentials=authenticate_write(),
-                cache_discovery=False,
-            )
-
-            publish_initial_batch(
-                read_service=service,
-                write_service=write_service,
-                parquet_name=parquet_name,
+        if loaded_manifest.empty:
+            publication_plan = preview_first_publication(
+                service=service,
+                new_manifest=new_manifest,
                 parquet_buffer=parquet_buffer,
-                manifest_bytes=manifest_bytes,
             )
 
-            print("\nPrimeira publicação concluída!")
-
+            if args.publish_initial:
+                write_service = build(
+                    "drive", "v3",
+                    credentials=authenticate_write(),
+                    cache_discovery=False,
+                )
+                publish_initial_batch(
+                    read_service=service,
+                    write_service=write_service,
+                    planned_batch=publication_plan,
+                    parquet_buffer=parquet_buffer,
+                    updated_manifest=updated_manifest,
+                    processed_row_count=len(processed),
+                )
+                print("\nPrimeira publicação confirmada!")
+            else:
+                print("\nModo de verificação: nenhum upload.")
         else:
-            print("\nModo de verificação: nenhum upload.")
+            if args.publish_initial:
+                raise RuntimeError(
+                    "--publish-initial é exclusivo da primeira carga."
+                )
+            print(
+                "\nNovas extrações validadas em memória. "
+                "Publicação incremental posterior à primeira carga "
+                "ainda não está implementada. Nenhum upload realizado."
+            )
 
     print(f"Registros processados: {len(processed)}")
     print(f"Colunas processadas: {len(processed.columns)}")

@@ -1,203 +1,125 @@
-
 import hashlib
-import json
-import os
 import re
-
-from src.loading.plan_ke24_incremental import FILE_ID
-
 from io import BytesIO
+
 from googleapiclient.http import MediaIoBaseUpload
 
-MANIFEST_NAME = "ke24_ingestion_manifest.json"
+from src.loading.ke24_drive_manifest import (
+    MANIFEST_NAME,
+    get_processed_folder_id,
+    list_processed_files,
+    serialize_processed_manifest,
+)
+from src.loading.plan_ke24_incremental import FILE_ID
 
 
-def preview_first_publication(
-    service,
-    new_manifest,
-    parquet_buffer,
-    manifest_bytes,
-):
+def preview_first_publication(service, new_manifest, parquet_buffer):
+    """Prévia SEM gravação para pasta que ainda não possui qualquer arquivo."""
+    if new_manifest.empty or new_manifest[FILE_ID].duplicated().any():
+        raise ValueError("Manifesto das novas extrações inválido.")
+    if list_processed_files(service):
+        raise RuntimeError("Pasta processed não vazia: primeira publicação bloqueada.")
 
-    folder_id = os.getenv("KE24_DRIVE_PROCESSED_FOLDER_ID")
-
-    if not folder_id or not re.fullmatch(
-        r"[A-Za-z0-9_-]+", folder_id
-    ):
-        raise ValueError("Pasta processed não configurada.")
-
-    if new_manifest.empty:
-        raise ValueError("Nenhuma extração nova para publicar.")
-
-    if parquet_buffer.getbuffer().nbytes == 0:
-        raise ValueError("O Parquet está vazio.")
-
-    document = json.loads(manifest_bytes.decode("utf-8"))
-
-    if (
-        document.get("schema_version") != 1
-        or len(document.get("files", [])) != len(new_manifest)
-    ):
-        raise ValueError("Manifesto inicial incompatível.")
-
-    # Verifica todos os arquivos presentes no destino.
-    files = []
-    page_token = None
-
-    while True:
-        response = service.files().list(
-            q=f"'{folder_id}' in parents and trashed = false",
-            fields="nextPageToken,files(id,name,mimeType)",
-            pageSize=100,
-            pageToken=page_token,
-        ).execute()
-
-        files.extend(response.get("files", []))
-        page_token = response.get("nextPageToken")
-
-        if not page_token:
-            break
-
-    # Esta operação é exclusiva da primeira carga.
-    # Não tentamos sobrescrever arquivos existentes.
-    if files:
-        raise RuntimeError(
-            "A pasta processed não está vazia. "
-            "Publicação inicial bloqueada para reconciliação."
-        )
-
-    # Identificador estável baseado nas extrações protegidas.
-    source_ids = sorted(
-        new_manifest[FILE_ID].astype(str).tolist()
-    )
-
-    batch_id = hashlib.sha256(
-        "\n".join(source_ids).encode("utf-8")
-    ).hexdigest()[:16]
-
+    payload = parquet_buffer.getvalue()
+    if not payload:
+        raise ValueError("Parquet vazio.")
+    source_ids = sorted(new_manifest[FILE_ID].astype(str).tolist())
+    batch_id = hashlib.sha256("\n".join(source_ids).encode("utf-8")).hexdigest()[:16]
     parquet_name = f"ke24_processed_{batch_id}.parquet"
-
-    parquet_buffer.seek(0)
-
-    parquet_hash = hashlib.sha256(
-        parquet_buffer.getvalue()
-    ).hexdigest()
+    parquet_sha256 = hashlib.sha256(payload).hexdigest()
+    plan = {
+        "batch_id": batch_id,
+        "parquet_name": parquet_name,
+        "parquet_sha256": parquet_sha256,
+        "byte_count": len(payload),
+        "source_file_ids": source_ids,
+    }
 
     print("\nPrévia da primeira publicação:")
-    print("Pasta de destino: OK")
-    print("Arquivos existentes: 0")
+    print("Pasta de destino: vazia")
     print(f"Parquet planejado: {parquet_name}")
-    print(f"Extrações no manifesto: {len(new_manifest)}")
-    print(f"Tamanho do Parquet: {parquet_buffer.getbuffer().nbytes} bytes")
-    print(f"SHA-256 do Parquet: {parquet_hash}")
-    print(f"Manifesto planejado: {MANIFEST_NAME}")
+    print(f"Extrações: {len(source_ids)}")
+    print(f"Tamanho: {len(payload)} bytes")
+    print(f"SHA-256: {parquet_sha256}")
+    print(f"Manifesto planejado: {MANIFEST_NAME} (schema 2)")
     print("Status: PRONTO PARA PUBLICAÇÃO")
     print("Nenhum upload realizado.")
+    return plan
 
-    return parquet_name
+
+def _upload_and_verify(service, folder_id, name, content, mime_type):
+    media = MediaIoBaseUpload(
+        BytesIO(content), mimetype=mime_type, resumable=False
+    )
+    created = service.files().create(
+        body={"name": name, "parents": [folder_id], "mimeType": mime_type},
+        media_body=media,
+        fields="id,name,parents",
+    ).execute()
+
+    if (not created.get("id") or created.get("name") != name
+            or folder_id not in created.get("parents", [])):
+        raise RuntimeError("Upload retornou metadados incompatíveis.")
+    received = service.files().get_media(fileId=created["id"]).execute()
+    if hashlib.sha256(received).digest() != hashlib.sha256(content).digest() or len(received) != len(content):
+        raise RuntimeError("O conteúdo recuperado difere do upload.")
+    return created["id"]
 
 
 def publish_initial_batch(
     read_service,
     write_service,
-    parquet_name,
+    planned_batch,
     parquet_buffer,
-    manifest_bytes,
+    updated_manifest,
+    processed_row_count,
 ):
-    """Publica a primeira carga e verifica os uploads."""
+    """Publica Parquet, valida-o, então publica o manifesto v2 com ID real.
 
-    folder_id = os.getenv("KE24_DRIVE_PROCESSED_FOLDER_ID")
+    NÃO faz limpeza automática após falhas (respostas de API podem ser perdidas).
+    """
+    folder_id = get_processed_folder_id()
+    if list_processed_files(read_service) or list_processed_files(write_service):
+        raise RuntimeError("Destino não vazio; primeira publicação bloqueada.")
+    if not isinstance(processed_row_count, int) or processed_row_count <= 0:
+        raise ValueError("Quantidade processada inválida.")
 
-    if not folder_id or not re.fullmatch(
-        r"[A-Za-z0-9_-]+", folder_id
-    ):
-        raise ValueError("Pasta processed inválida.")
-
-    # Verifica novamente o destino antes de publicar.
-    response = read_service.files().list(
-        q=f"'{folder_id}' in parents and trashed = false",
-        fields="nextPageToken,files(id,name)",
-        pageSize=1,
-    ).execute()
-
-    if response.get("files") or response.get("nextPageToken"):
-        raise RuntimeError(
-            "Pasta processed não está vazia. "
-            "Publicação inicial bloqueada."
-        )
-
-    parquet_bytes = parquet_buffer.getvalue()
-
-    if not parquet_bytes or not manifest_bytes:
-        raise ValueError("Artefatos de publicação vazios.")
-
-    def upload_and_verify(name, content, mime_type):
-        media = MediaIoBaseUpload(
-            BytesIO(content),
-            mimetype=mime_type,
-            resumable=False,
-        )
-
-        created = write_service.files().create(
-            body={
-                "name": name,
-                "parents": [folder_id],
-                "mimeType": mime_type,
-            },
-            media_body=media,
-            fields="id,name,parents",
-        ).execute()
-
-        if (
-            created.get("name") != name
-            or folder_id not in created.get("parents", [])
-        ):
-            raise RuntimeError(
-                "Arquivo publicado fora do destino esperado."
-            )
-
-        downloaded = write_service.files().get_media(
-            fileId=created["id"]
-        ).execute()
-
-        if downloaded != content:
-            raise RuntimeError(
-                f"Falha na verificação do arquivo {name}."
-            )
-
-        return created
+    payload = parquet_buffer.getvalue()
+    if len(payload) != planned_batch["byte_count"] or hashlib.sha256(payload).hexdigest() != planned_batch["parquet_sha256"]:
+        raise RuntimeError("Parquet modificado depois da prévia; publicação bloqueada.")
+    if not re.fullmatch(r"ke24_processed_[0-9a-f]{16}\.parquet", planned_batch["parquet_name"]):
+        raise ValueError("Nome do Parquet inválido.")
+    if int(updated_manifest["record_count"].sum()) != processed_row_count:
+        raise ValueError("Total de registros do manifesto não corresponde ao Parquet.")
+    if set(updated_manifest[FILE_ID]) != set(planned_batch["source_file_ids"]):
+        raise ValueError("Extrações do manifesto não correspondem ao lote.")
 
     try:
         print("\nPublicando Parquet protegido...")
-
-        parquet_file = upload_and_verify(
-            parquet_name,
-            parquet_bytes,
-            "application/octet-stream",
+        parquet_id = _upload_and_verify(
+            write_service, folder_id, planned_batch["parquet_name"],
+            payload, "application/octet-stream",
         )
+        print("Parquet enviado e verificado.")
 
-        print("Parquet publicado e verificado!")
+        batch = {
+            **planned_batch,
+            "parquet_id": parquet_id,
+            "record_count": processed_row_count,
+        }
+        manifest_bytes = serialize_processed_manifest(updated_manifest, [batch])
 
-        # Somente depois do Parquet confirmado.
-        print("\nPublicando manifesto...")
-
-        manifest_file = upload_and_verify(
-            MANIFEST_NAME,
-            manifest_bytes,
-            "application/json",
+        print("Publicando manifesto vinculado ao Parquet...")
+        manifest_id = _upload_and_verify(
+            write_service, folder_id, MANIFEST_NAME,
+            manifest_bytes, "application/json",
         )
+        print("Manifesto enviado e verificado.")
 
-        print("Manifesto publicado e verificado!")
-
-    except Exception as error:
+    except Exception as exc:
         raise RuntimeError(
-            "Publicação incompleta ou indeterminada. "
-            "Não repita o upload automaticamente. "
-            "Confira os arquivos existentes no Drive "
-            "e realize a reconciliação."
-        ) from error
+            "Publicação incompleta ou indeterminada: NÃO repita automaticamente. "
+            "Confira a pasta processed e reconcilie os artefatos antes de prosseguir."
+        ) from exc
 
-    return {
-        "parquet_id": parquet_file["id"],
-        "manifest_id": manifest_file["id"],
-    }
+    return {"parquet_id": parquet_id, "manifest_id": manifest_id}
