@@ -237,11 +237,6 @@ def main():
         print(f"Colunas: {len(processed.columns)}")
 
 
-        # Prepara o manifesto que seria publicado.
-        manifest_bytes = serialize_processed_manifest(
-            updated_manifest
-        )
-
         if loaded_manifest.empty:
             publication_plan = preview_first_publication(
                 service=service,
@@ -251,10 +246,12 @@ def main():
 
             if args.publish_initial:
                 write_service = build(
-                    "drive", "v3",
+                    "drive",
+                    "v3",
                     credentials=authenticate_write(),
                     cache_discovery=False,
                 )
+
                 publish_initial_batch(
                     read_service=service,
                     write_service=write_service,
@@ -263,19 +260,11 @@ def main():
                     updated_manifest=updated_manifest,
                     processed_row_count=len(processed),
                 )
+
                 print("\nPrimeira publicação confirmada!")
+
             else:
                 print("\nModo de verificação: nenhum upload.")
-        else:
-            if args.publish_initial:
-                raise RuntimeError(
-                    "--publish-initial é exclusivo da primeira carga."
-                )
-            print(
-                "\nNovas extrações validadas em memória. "
-                "Publicação incremental posterior à primeira carga "
-                "ainda não está implementada. Nenhum upload realizado."
-            )
 
     print(f"Registros processados: {len(processed)}")
     print(f"Colunas processadas: {len(processed.columns)}")
