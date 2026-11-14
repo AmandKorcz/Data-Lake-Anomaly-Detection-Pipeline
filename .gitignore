@@ -41,3 +41,10 @@ Thumbs.db
 
 # Trained ML models - local protected artifacts
 /data/models/
+
+# OAuth Google Drive / Sheets (defesa extra)
+oauth-client.json
+drive-token.json
+drive-write-token.json
+token.json
+client_secret*.json

@@ -213,13 +213,23 @@ class TestKE24OfflineSecurityIntegration(unittest.TestCase):
         self.assertEqual(self.bigquery.write_calls, 0)
         self.assertEqual(self.storage.delete_calls, 0)
 
-    def test_real_policy_is_still_draft(self):
+
+    def test_real_policy_is_approved(self):
         policy_file = (
             Path(__file__).resolve().parents[1]
-            / "config" / "ke24_privacy_policy.json"
+            / "config"
+            / "ke24_privacy_policy.json"
         )
-        policy = json.loads(policy_file.read_text(encoding="utf-8"))
-        self.assertEqual(policy["status"], "DRAFT_REVIEW_REQUIRED")
+
+        policy = json.loads(
+            policy_file.read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(
+            policy["status"],
+            "APPROVED",
+        )
+
 
     def test_draft_blocks_before_creating_lock_or_journal(self):
         result = self.register("DRAFT_REVIEW_REQUIRED")
