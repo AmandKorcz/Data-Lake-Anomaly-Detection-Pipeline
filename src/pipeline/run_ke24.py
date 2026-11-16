@@ -10,6 +10,10 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from src.config.ke24_local_settings import load_ke24_local_settings
+from src.pipeline.ke24_preview_execution_guard import (
+    PreviewAlreadyRunning, exclusive_preview, read_preview_report,
+    write_preview_report,
+)
 
 # Um unico arquivo local para o CLI; os dados nunca sao exibidos nos logs.
 load_ke24_local_settings()
@@ -260,7 +264,8 @@ def _open_read_only_drive():
 
 def run_preview(root=ROOT, environ=None):
     env = os.environ if environ is None else environ
-    LOG.info("KE24 | preview integrado SOMENTE LEITURA | run_id=%s", uuid4().hex[:12])
+    run_id = uuid4().hex[:12]
+    LOG.info("KE24 | preview integrado SOMENTE LEITURA | run_id=%s", run_id)
     report = inspect_cloud_flow(root, env)
     if not report["ready_for_review"]:
         LOG.error("Preflight incompleto; confira --dry-run antes de conectar ao Drive.")
@@ -273,17 +278,70 @@ def run_preview(root=ROOT, environ=None):
         LOG.error("Variaveis ausentes neste processo: %s", ", ".join(missing))
         return 1
 
+    started_at = datetime.now(timezone.utc)
+    started = perf_counter()
+    status = "FAILED"
+    result = None
+    failure_kind = None
+    exit_code = 1
     try:
-        service, policy, schema, secret_key = _open_read_only_drive()
-        execute_readonly_stages(service, policy, schema, secret_key)
-    except PreviewBlocked as exc:
-        LOG.error("BLOQUEADO: %s", exc)
+        with exclusive_preview(root, run_id):
+            try:
+                service, policy, schema, secret_key = _open_read_only_drive()
+                result = execute_readonly_stages(service, policy, schema, secret_key)
+            except PreviewBlocked as exc:
+                status, failure_kind = "BLOCKED", "PreviewBlocked"
+                LOG.error("BLOQUEADO: %s", exc)
+            except KeyboardInterrupt:
+                status, failure_kind = "INTERRUPTED", "KeyboardInterrupt"
+                LOG.error("Previa interrompida pelo usuario; nenhuma publicacao realizada.")
+                exit_code = 130
+            except Exception as exc:
+                status = "FAILED"
+                failure_kind = type(exc).__name__
+                # Nunca imprimir mensagem arbitraria de excecao: pode conter IDs.
+                LOG.error("[FALHA] Previa interrompida (%s). Verifique a etapa.", type(exc).__name__)
+            else:
+                status, exit_code = "SUCCESS", 0
+                LOG.info("Concluido: sem publicar no Drive/Sheets/BigQuery nem gravar dados/modelos.")
+            finally:
+                # Status agregado somente; nenhuma linha, ID de Drive ou valor financeiro.
+                write_preview_report(
+                    root, run_id=run_id, started_at=started_at,
+                    duration_seconds=perf_counter() - started,
+                    status=status, result=result, failure_kind=failure_kind,
+                )
+    except PreviewAlreadyRunning:
+        LOG.error("[BLOQUEADO] Ja existe uma previa local ativa ou um lock pendente. "
+                  "Nenhuma conexao realizada.")
         return 1
     except Exception as exc:
-        # Sem stack trace nem IDs, valores financeiros ou dados de origem no log.
-        LOG.error("[FALHA] Previa interrompida (%s). Verifique os logs do passo.", type(exc).__name__)
+        LOG.error("[FALHA] Controle local da execucao (%s).", type(exc).__name__)
         return 1
-    LOG.info("Concluido: sem publicar no Drive/Sheets/BigQuery nem persistir dados/modelos locais.")
+
+    LOG.info("Execucao %s | run_id=%s | duracao=%.2fs | status em data/curated",
+             status, run_id, perf_counter() - started)
+    return exit_code
+
+
+def run_last_status(root=ROOT):
+    """Consulta offline o ultimo status gerado pelo --preview."""
+    try:
+        status = read_preview_report(root)
+    except (OSError, ValueError) as exc:
+        LOG.error("Relatorio local indisponivel (%s).", type(exc).__name__)
+        return 1
+    if status is None:
+        LOG.info("Nenhuma previa registrada neste repositorio.")
+        return 1
+    LOG.info("Ultima previa: %s | run_id=%s | duracao=%.2fs | inicio_utc=%s",
+             status["status"], status["run_id"], status["duration_seconds"],
+             status["started_at_utc"])
+    for key, value in status.get("metrics", {}).items():
+        if key in {"processed_rows", "train_rows", "validation_rows",
+                   "candidate_count", "stable_all_seeds", "history_existing",
+                   "history_new", "sheet_rows"} and type(value) is int:
+            LOG.info("  %s: %d", key, value)
     return 0
 
 
@@ -295,12 +353,17 @@ def main(argv=None):
         "--preview", action="store_true",
         help="Consulta Drive e executa ML/historico/planilha em memoria; NAO publica",
     )
+    modes.add_argument("--last-run", action="store_true", help="Mostra o ultimo status local, sem acessar o Drive")
     args = parser.parse_args(argv)
     logging.basicConfig(
         level=logging.INFO, stream=sys.stdout,
         format="%(asctime)s | %(levelname)s | %(message)s",
     )
-    return run_dry_run() if args.dry_run else run_preview()
+    if args.dry_run:
+        return run_dry_run()
+    if args.last_run:
+        return run_last_status()
+    return run_preview()
 
 
 if __name__ == "__main__":
