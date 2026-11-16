@@ -39,8 +39,15 @@ class TestKE24BigQueryPrivacy(unittest.TestCase):
         client.get_table.assert_not_called()
         client.load_table_from_dataframe.assert_not_called()
 
+
     def test_draft_policy_blocks_release(self):
         protected_table = "KE24_staging_protected"
+
+        # Simula uma política que ainda não foi aprovada.
+        draft_policy = {
+            **self.policy,
+            "status": "DRAFT_REVIEW_REQUIRED",
+        }
 
         with (
             patch.object(loader, "BQ_TABLE", protected_table),
@@ -54,14 +61,18 @@ class TestKE24BigQueryPrivacy(unittest.TestCase):
                 loader,
                 "load_privacy_runtime",
                 return_value=(
-                    self.policy,
+                    draft_policy,
                     self.schema,
                     b"x" * 32,
                 ),
             ),
         ):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "política não aprovada",
+            ):
                 loader.validate_bigquery_release()
+
 
     def test_raw_identifiers_are_rejected(self):
         protected_table = "KE24_staging_protected"
