@@ -1,42 +1,50 @@
 from pathlib import Path
 
-from src.pipeline.run_ke24 import STEPS, inspect_project, run_dry_run
+from src.pipeline import run_ke24
 
 
-def build_fake_repo(root: Path) -> None:
-    for _stage, paths in STEPS:
-        for rel in paths:
-            file = root / rel
-            file.parent.mkdir(parents=True, exist_ok=True)
-            file.write_text("# fake fixture\n", encoding="utf-8")
+def _fake_files(tmp_path):
+    for _, file_path in run_ke24.STEPS:
+        path = tmp_path / file_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('# fixture\n', encoding='utf-8')
 
 
-def test_dry_run_structure_ok_without_real_data(tmp_path):
-    build_fake_repo(tmp_path)
-    report = inspect_project(tmp_path)
-    assert report["structural_ok"] is True
-    assert all(not present for present in report["artifacts"].values())
-    assert run_dry_run(tmp_path) == 0
+def test_components_and_existing_environment(tmp_path):
+    _fake_files(tmp_path)
+    result = run_ke24.inspect_cloud_flow(
+        tmp_path, {"KE24_DRIVE_RAW_FOLDER_ID": "pasta-pre-configurada"}
+    )
+    assert result["ready_for_review"] is True
+    assert len(result["steps"]) == 5
+    assert run_ke24.run_dry_run(
+        tmp_path, {"KE24_DRIVE_RAW_FOLDER_ID": "pasta-pre-configurada"}
+    ) == 0
 
 
-def test_dry_run_reports_missing_component_without_writing(tmp_path):
-    build_fake_repo(tmp_path)
-    missing_file = tmp_path / STEPS[0][1][0]
-    missing_file.unlink()
-    before = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*") if p.is_file())
-    report = inspect_project(tmp_path)
-    assert report["structural_ok"] is False
-    assert report["steps"][0]["missing"] == [STEPS[0][1][0]]
-    assert run_dry_run(tmp_path) == 1
-    after = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*") if p.is_file())
-    assert before == after
+def test_missing_source_variable_fails_closed(tmp_path):
+    _fake_files(tmp_path)
+    assert run_ke24.inspect_cloud_flow(tmp_path, {})["ready_for_review"] is False
+    assert run_ke24.run_dry_run(tmp_path, {}) == 1
 
 
-def test_dry_run_ignores_local_raw_sources(tmp_path):
-    build_fake_repo(tmp_path)
-    raw = tmp_path / "data/raw"
-    raw.mkdir(parents=True)
-    (raw / "ke24_dummy.xlsx").write_bytes(b"not even valid XLSX")
-    report = inspect_project(tmp_path)
-    assert "raw_xlsx_count" not in report
-    assert report["structural_ok"] is True
+def test_missing_entrypoint_fails_closed(tmp_path):
+    _fake_files(tmp_path)
+    (tmp_path / run_ke24.STEPS[-1][1]).unlink()
+    result = run_ke24.inspect_cloud_flow(
+        tmp_path, {"KE24_DRIVE_RAW_FOLDER_ID": "already-configured"}
+    )
+    assert result["ready_for_review"] is False
+    assert run_ke24.run_dry_run(
+        tmp_path, {"KE24_DRIVE_RAW_FOLDER_ID": "already-configured"}
+    ) == 1
+
+
+def test_local_raw_ignored(tmp_path):
+    _fake_files(tmp_path)
+    local_raw = tmp_path / 'data' / 'raw'
+    local_raw.mkdir(parents=True)
+    (local_raw / 'unrelated.xlsx').write_bytes(b'not a spreadsheet')
+    assert run_ke24.inspect_cloud_flow(
+        tmp_path, {"KE24_DRIVE_RAW_FOLDER_ID": "already-configured"}
+    )["ready_for_review"] is True
