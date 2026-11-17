@@ -15,13 +15,11 @@ from src.pipeline.ke24_preview_execution_guard import (
     write_preview_report,
 )
 
-# Um unico arquivo local para o CLI; os dados nunca sao exibidos nos logs.
 load_ke24_local_settings()
 
 ROOT = Path(__file__).resolve().parents[2]
 LOG = logging.getLogger("ke24.orchestrator")
 
-# Mantem o contrato do dry-run e dos testes anteriores.
 STEPS = (
     ("Ingestao incremental pelo Google Drive", "src/pipeline/run_ke24_drive_ingestion.py"),
     ("Features a partir da camada processed", "src/pipeline/run_ke24_drive_features.py"),
@@ -107,11 +105,10 @@ def audit_drive_sources(
     calculate_hash=None,
     tokenize=None,
 ):
-    """Confere hashes do raw (em memoria) com arquivos commitados no manifesto.
-
-    Nunca devolve nomes, IDs ou conteudo; so contagens. Se houver arquivo novo,
-    bloqueia a inferencia para nao usar apenas uma base processed antiga.
-    """
+    use_parallel = (
+        list_raw is None and download is None and read_manifest is None
+        and calculate_hash is None and tokenize is None
+    )
     if list_raw is None or download is None:
         from src.ingestion.google_drive_client import (
             list_raw_xlsx_files,
@@ -141,20 +138,31 @@ def audit_drive_sources(
     if FILE_ID not in manifest.columns or manifest[FILE_ID].isna().any():
         raise PreviewBlocked("Manifesto processed invalido; revisao necessaria.")
     committed = set(manifest[FILE_ID].astype(str))
-    raw_tokens = set()
-
-    for source in source_files:
-        with download(service, source["id"]) as buffer:
-            digest = calculate_hash(buffer)
-        protected_hash = tokenize(
-            value=digest,
-            column=FILE_ID,
-            company=None,
-            secret_key=secret_key,
+  
+    if use_parallel:
+        from src.pipeline.ke24_parallel_raw_audit import (
+            DuplicateRawContent, audit_raw_sources_parallel,
         )
-        if protected_hash in raw_tokens:
-            raise PreviewBlocked("Conteudo XLSX duplicado no raw; revisao necessaria.")
-        raw_tokens.add(protected_hash)
+        try:
+            raw_tokens = audit_raw_sources_parallel(source_files, secret_key)
+        except DuplicateRawContent:
+            raise PreviewBlocked(
+                "Conteudo XLSX duplicado no raw; revisao necessaria."
+            ) from None
+    else:
+        raw_tokens = set()
+        for source in source_files:
+            with download(service, source["id"]) as buffer:
+                digest = calculate_hash(buffer)
+            protected_hash = tokenize(
+                value=digest,
+                column=FILE_ID,
+                company=None,
+                secret_key=secret_key,
+            )
+            if protected_hash in raw_tokens:
+                raise PreviewBlocked("Conteudo XLSX duplicado no raw; revisao necessaria.")
+            raw_tokens.add(protected_hash)
 
     missing = raw_tokens - committed
     if missing:
@@ -166,7 +174,6 @@ def audit_drive_sources(
 
 
 def _live_adapters():
-    # Importados apenas no modo --preview, que usa OAuth e dados remotos.
     from src.pipeline.run_ke24_drive_features import (
         build_features_in_memory,
         load_verified_processed_dataframe,
@@ -193,11 +200,6 @@ def _live_adapters():
 def execute_readonly_stages(
     service, privacy_policy, schema, secret_key, *, adapters=None, source_audit=None
 ):
-    """Uma unica leitura do processed e uma unica previa de ML.
-
-    ``build_alert_preview_in_memory`` ja treina/avalia os modelos; nao chamar
-    ``run_ke24_drive_model.main`` em paralelo (isso repetiria o treino).
-    """
     adapters = adapters or _live_adapters()
     source_audit = source_audit or audit_drive_sources
 
@@ -299,13 +301,11 @@ def run_preview(root=ROOT, environ=None):
             except Exception as exc:
                 status = "FAILED"
                 failure_kind = type(exc).__name__
-                # Nunca imprimir mensagem arbitraria de excecao: pode conter IDs.
                 LOG.error("[FALHA] Previa interrompida (%s). Verifique a etapa.", type(exc).__name__)
             else:
                 status, exit_code = "SUCCESS", 0
                 LOG.info("Concluido: sem publicar no Drive/Sheets/BigQuery nem gravar dados/modelos.")
             finally:
-                # Status agregado somente; nenhuma linha, ID de Drive ou valor financeiro.
                 write_preview_report(
                     root, run_id=run_id, started_at=started_at,
                     duration_seconds=perf_counter() - started,
@@ -325,7 +325,6 @@ def run_preview(root=ROOT, environ=None):
 
 
 def run_last_status(root=ROOT):
-    """Consulta offline o ultimo status gerado pelo --preview."""
     try:
         status = read_preview_report(root)
     except (OSError, ValueError) as exc:
