@@ -179,6 +179,7 @@ def _live_adapters():
     )
     from src.loading.ke24_looker_sheet import build_matrix
     from src.ml.load_ke24_alert_rules import load_protected_alert_rules
+    from src.pipeline.ke24_business_checks_bridge import run_readonly_business_checks
 
     return SimpleNamespace(
         load_processed=load_verified_processed_dataframe,
@@ -189,6 +190,7 @@ def _live_adapters():
         append_alerts=append_new_alerts,
         sheet_matrix=build_matrix,
         load_rules=load_protected_alert_rules,
+        run_business_checks=run_readonly_business_checks,
     )
 
 
@@ -213,6 +215,19 @@ def execute_readonly_stages(
 
     with _timed_stage("Leitura verificada do processed no Drive"):
         processed = adapters.load_processed(service, privacy_policy, schema)
+
+    # O adapter real executa os checks; os dublês dos testes antigos
+    # continuam independentes e nao precisam fornecer esse método.
+    business_summary = None
+    if hasattr(adapters, 'run_business_checks'):
+        with _timed_stage("Regras oficiais de negocio - somente leitura"):
+            business_summary = adapters.run_business_checks(processed, secret_key)
+        from src.pipeline.ke24_business_checks_bridge import SAFE_BUSINESS_KEYS
+        if not isinstance(business_summary, dict) or (
+            set(business_summary) != set(SAFE_BUSINESS_KEYS) or
+            any(type(value) is not int or value < 0 for value in business_summary.values())
+        ):
+            raise ValueError("Resumo das regras de negocio invalido.")
 
     with _timed_stage("Feature engineering em memoria"):
         dataset, feature_manifest, stats = adapters.build_features(processed, privacy_policy)
@@ -272,6 +287,22 @@ def execute_readonly_stages(
         "history_new": newly_detected,
         "sheet_rows": max(0, len(matrix) - 1),
     }
+    if business_summary is not None:
+        result.update(business_summary)
+        LOG.info(
+            "REGRAS OFICIAIS: total=%d, pass=%d, revisao_media=%d, "
+            "revisao_alta=%d, violacao=%d, pendentes=%d",
+            result['business_checks_total'], result['business_checks_pass'],
+            result['business_checks_review_medium'], result['business_checks_review_high'],
+            result['business_checks_violation'], result['business_checks_pending'],
+        )
+        LOG.info(
+            "PENDENTES: historico=%d, base_zero=%d, moeda_nao_configurada=%d; "
+            "receita=%d, materiais=%d",
+            result['business_pending_history'], result['business_pending_zero_baseline'],
+            result['business_pending_company_currency'],
+            result['business_pending_revenue'], result['business_pending_material'],
+        )
     if classification_summary is not None:
         result.update(classification_summary)
         LOG.info(
@@ -392,7 +423,12 @@ def run_last_status(root=ROOT):
                    "history_new", "sheet_rows", "classification_total",
                    "classification_pending", "classification_experimental",
                    "classification_ready", "priority_high", "priority_medium",
-                   "priority_low"} and type(value) is int:
+                   "priority_low", "business_checks_total", "business_checks_pass",
+                   "business_checks_review_medium", "business_checks_review_high",
+                   "business_checks_violation", "business_checks_pending",
+                   "business_pending_history", "business_pending_zero_baseline",
+                   "business_pending_company_currency", "business_pending_revenue",
+                   "business_pending_material"} and type(value) is int:
             LOG.info("  %s: %d", key, value)
     return 0
 

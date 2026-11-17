@@ -31,6 +31,17 @@ SAFE_METRICS = (
     "priority_high",
     "priority_medium",
     "priority_low",
+    "business_checks_total",
+    "business_checks_pass",
+    "business_checks_review_medium",
+    "business_checks_review_high",
+    "business_checks_violation",
+    "business_checks_pending",
+    "business_pending_history",
+    "business_pending_zero_baseline",
+    "business_pending_company_currency",
+    "business_pending_revenue",
+    "business_pending_material",
 )
 
 
