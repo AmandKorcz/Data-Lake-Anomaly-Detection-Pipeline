@@ -1,0 +1,425 @@
+diff --git a/src/pipeline/ke24_preview_execution_guard.py b/src/pipeline/ke24_preview_execution_guard.py
+new file mode 100644
+index 0000000..0acd3c6
+--- /dev/null
++++ b/src/pipeline/ke24_preview_execution_guard.py
+@@ -0,0 +1,143 @@
++"""Controle local da previa KE24: exclusao mutua e auditoria SEM dados KE24.
++
++Nao e um lock distribuido do Google Drive. Nunca publicar dados neste modulo.
++O diretorio data/curated/ ja e ignorado pelo Git neste repositorio.
++"""
++
++import json
++import os
++from contextlib import contextmanager
++from datetime import datetime, timezone
++from pathlib import Path
++from time import perf_counter
++
++LOCK_NAME = ".ke24_preview.lock"
++REPORT_NAME = "ke24_preview_last_run.json"
++REPORT_SCHEMA_VERSION = 1
++ALLOWED_STATUSES = {"SUCCESS", "BLOCKED", "FAILED", "INTERRUPTED"}
++SAFE_METRICS = (
++    "processed_rows",
++    "train_rows",
++    "validation_rows",
++    "candidate_count",
++    "stable_all_seeds",
++    "history_existing",
++    "history_new",
++    "sheet_rows",
++)
++
++
++class PreviewAlreadyRunning(RuntimeError):
++    """Existe uma previa em andamento (ou lock de execucao interrompida)."""
++
++
++def control_directory(root: Path) -> Path:
++    return Path(root) / "data" / "curated"
++
++
++def report_file(root: Path) -> Path:
++    return control_directory(root) / REPORT_NAME
++
++
++@contextmanager
++def exclusive_preview(root: Path, run_id: str):
++    """Lock atomico no mesmo diretorio de trabalho, sem remover locks alheios.
++
++    Um lock deixado apos encerramento abrupto exige verificacao manual; nao
++    usamos limpeza automatica por idade, porque uma analise pode ser longa.
++    """
++    directory = control_directory(root)
++    directory.mkdir(parents=True, exist_ok=True)
++    path = directory / LOCK_NAME
++    try:
++        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
++    except FileExistsError:
++        raise PreviewAlreadyRunning(
++            "Outra previa pode estar em execucao; verifique o lock local antes de repetir."
++        ) from None
++
++    try:
++        with os.fdopen(fd, "w", encoding="utf-8") as stream:
++            json.dump({"run_id": run_id, "pid": os.getpid()}, stream)
++            stream.write("\n")
++    except BaseException:
++        path.unlink(missing_ok=True)
++        raise
++
++    try:
++        yield
++    finally:
++        # Nao apagar acidentalmente um lock que foi trocado por outro processo.
++        try:
++            owner = json.loads(path.read_text(encoding="utf-8"))
++        except (OSError, ValueError) as exc:
++            raise RuntimeError("Lock de previa alterado/ausente; verificacao manual necessaria.") from exc
++        if owner.get("run_id") != run_id or owner.get("pid") != os.getpid():
++            raise RuntimeError("Propriedade do lock mudou; nao remover automaticamente.")
++        path.unlink()
++
++
++def _safe_metrics(result):
++    if not isinstance(result, dict):
++        return {}
++    return {
++        name: result[name]
++        for name in SAFE_METRICS
++        if type(result.get(name)) is int and result[name] >= 0
++    }
++
++
++def write_preview_report(
++    root: Path, *, run_id: str, started_at: datetime, duration_seconds: float,
++    status: str, result=None, failure_kind: str | None = None,
++):
++    """Sobrescreve apenas o ultimo status; jamais salva arquivos, IDs ou valores.
++
++    O arquivo temporario e criado exclusivamente e substituido atomicamente
++    pelo ultimo status, dentro de data/curated (ignorado pelo Git).
++    """
++    if status not in ALLOWED_STATUSES:
++        raise ValueError("Status da previa nao suportado.")
++    if not run_id or not run_id.isalnum():
++        raise ValueError("Run ID invalido.")
++
++    directory = control_directory(root)
++    directory.mkdir(parents=True, exist_ok=True)
++    finished = datetime.now(timezone.utc)
++    content = {
++        "schema_version": REPORT_SCHEMA_VERSION,
++        "run_id": run_id,
++        "mode": "preview_readonly",
++        "status": status,
++        "started_at_utc": started_at.isoformat(timespec="seconds"),
++        "finished_at_utc": finished.isoformat(timespec="seconds"),
++        "duration_seconds": round(max(0.0, duration_seconds), 3),
++        "metrics": _safe_metrics(result),
++        "failure_kind": failure_kind if failure_kind in {
++            "Preflight", "PreviewBlocked", "RuntimeError", "Exception", "KeyboardInterrupt"
++        } else None,
++    }
++    target = report_file(root)
++    temporary = directory / f".{REPORT_NAME}.{run_id}.tmp"
++    try:
++        # Sem dados protegidos; ainda assim exige permissao restrita quando suportada.
++        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
++        with os.fdopen(fd, "w", encoding="utf-8") as stream:
++            json.dump(content, stream, indent=2, ensure_ascii=True)
++            stream.write("\n")
++        os.replace(temporary, target)
++    finally:
++        temporary.unlink(missing_ok=True)
++    return target
++
++
++def read_preview_report(root: Path):
++    path = report_file(root)
++    if not path.exists():
++        return None
++    document = json.loads(path.read_text(encoding="utf-8"))
++    if not isinstance(document, dict) or document.get("schema_version") != REPORT_SCHEMA_VERSION:
++        raise ValueError("Relatorio de previa local incompativel.")
++    if document.get("status") not in ALLOWED_STATUSES:
++        raise ValueError("Status armazenado invalido.")
++    return document
+diff --git a/src/pipeline/run_ke24.py b/src/pipeline/run_ke24.py
+index d88f01a..01b77fd 100644
+--- a/src/pipeline/run_ke24.py
++++ b/src/pipeline/run_ke24.py
+@@ -20,6 +20,10 @@ from types import SimpleNamespace
+ from uuid import uuid4
+ 
+ from src.config.ke24_local_settings import load_ke24_local_settings
++from src.pipeline.ke24_preview_execution_guard import (
++    PreviewAlreadyRunning, exclusive_preview, read_preview_report,
++    write_preview_report,
++)
+ 
+ # Um unico arquivo local para o CLI; os dados nunca sao exibidos nos logs.
+ load_ke24_local_settings()
+@@ -270,7 +274,8 @@ def _open_read_only_drive():
+ 
+ def run_preview(root=ROOT, environ=None):
+     env = os.environ if environ is None else environ
+-    LOG.info("KE24 | preview integrado SOMENTE LEITURA | run_id=%s", uuid4().hex[:12])
++    run_id = uuid4().hex[:12]
++    LOG.info("KE24 | preview integrado SOMENTE LEITURA | run_id=%s", run_id)
+     report = inspect_cloud_flow(root, env)
+     if not report["ready_for_review"]:
+         LOG.error("Preflight incompleto; confira --dry-run antes de conectar ao Drive.")
+@@ -283,17 +288,70 @@ def run_preview(root=ROOT, environ=None):
+         LOG.error("Variaveis ausentes neste processo: %s", ", ".join(missing))
+         return 1
+ 
++    started_at = datetime.now(timezone.utc)
++    started = perf_counter()
++    status = "FAILED"
++    result = None
++    failure_kind = None
++    exit_code = 1
+     try:
+-        service, policy, schema, secret_key = _open_read_only_drive()
+-        execute_readonly_stages(service, policy, schema, secret_key)
+-    except PreviewBlocked as exc:
+-        LOG.error("BLOQUEADO: %s", exc)
++        with exclusive_preview(root, run_id):
++            try:
++                service, policy, schema, secret_key = _open_read_only_drive()
++                result = execute_readonly_stages(service, policy, schema, secret_key)
++            except PreviewBlocked as exc:
++                status, failure_kind = "BLOCKED", "PreviewBlocked"
++                LOG.error("BLOQUEADO: %s", exc)
++            except KeyboardInterrupt:
++                status, failure_kind = "INTERRUPTED", "KeyboardInterrupt"
++                LOG.error("Previa interrompida pelo usuario; nenhuma publicacao realizada.")
++                exit_code = 130
++            except Exception as exc:
++                status = "FAILED"
++                failure_kind = type(exc).__name__
++                # Nunca imprimir mensagem arbitraria de excecao: pode conter IDs.
++                LOG.error("[FALHA] Previa interrompida (%s). Verifique a etapa.", type(exc).__name__)
++            else:
++                status, exit_code = "SUCCESS", 0
++                LOG.info("Concluido: sem publicar no Drive/Sheets/BigQuery nem gravar dados/modelos.")
++            finally:
++                # Status agregado somente; nenhuma linha, ID de Drive ou valor financeiro.
++                write_preview_report(
++                    root, run_id=run_id, started_at=started_at,
++                    duration_seconds=perf_counter() - started,
++                    status=status, result=result, failure_kind=failure_kind,
++                )
++    except PreviewAlreadyRunning:
++        LOG.error("[BLOQUEADO] Ja existe uma previa local ativa ou um lock pendente. "
++                  "Nenhuma conexao realizada.")
+         return 1
+     except Exception as exc:
+-        # Sem stack trace nem IDs, valores financeiros ou dados de origem no log.
+-        LOG.error("[FALHA] Previa interrompida (%s). Verifique os logs do passo.", type(exc).__name__)
++        LOG.error("[FALHA] Controle local da execucao (%s).", type(exc).__name__)
++        return 1
++
++    LOG.info("Execucao %s | run_id=%s | duracao=%.2fs | status em data/curated",
++             status, run_id, perf_counter() - started)
++    return exit_code
++
++
++def run_last_status(root=ROOT):
++    """Consulta offline o ultimo status gerado pelo --preview."""
++    try:
++        status = read_preview_report(root)
++    except (OSError, ValueError) as exc:
++        LOG.error("Relatorio local indisponivel (%s).", type(exc).__name__)
++        return 1
++    if status is None:
++        LOG.info("Nenhuma previa registrada neste repositorio.")
+         return 1
+-    LOG.info("Concluido: sem publicar no Drive/Sheets/BigQuery nem persistir dados/modelos locais.")
++    LOG.info("Ultima previa: %s | run_id=%s | duracao=%.2fs | inicio_utc=%s",
++             status["status"], status["run_id"], status["duration_seconds"],
++             status["started_at_utc"])
++    for key, value in status.get("metrics", {}).items():
++        if key in {"processed_rows", "train_rows", "validation_rows",
++                   "candidate_count", "stable_all_seeds", "history_existing",
++                   "history_new", "sheet_rows"} and type(value) is int:
++            LOG.info("  %s: %d", key, value)
+     return 0
+ 
+ 
+@@ -305,12 +363,17 @@ def main(argv=None):
+         "--preview", action="store_true",
+         help="Consulta Drive e executa ML/historico/planilha em memoria; NAO publica",
+     )
++    modes.add_argument("--last-run", action="store_true", help="Mostra o ultimo status local, sem acessar o Drive")
+     args = parser.parse_args(argv)
+     logging.basicConfig(
+         level=logging.INFO, stream=sys.stdout,
+         format="%(asctime)s | %(levelname)s | %(message)s",
+     )
+-    return run_dry_run() if args.dry_run else run_preview()
++    if args.dry_run:
++        return run_dry_run()
++    if args.last_run:
++        return run_last_status()
++    return run_preview()
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/tests/test_ke24_preview_execution_guard.py b/tests/test_ke24_preview_execution_guard.py
+new file mode 100644
+index 0000000..6a102cc
+--- /dev/null
++++ b/tests/test_ke24_preview_execution_guard.py
+@@ -0,0 +1,148 @@
++"""Auditoria e concorrencia locais; os testes nunca conectam ao Google Drive."""
++from datetime import datetime, timezone
++from pathlib import Path
++
++import pytest
++
++from src.pipeline import run_ke24
++from src.pipeline.ke24_preview_execution_guard import (
++    PreviewAlreadyRunning,
++    exclusive_preview,
++    read_preview_report,
++    report_file,
++    write_preview_report,
++)
++
++
++def _fake_project(root: Path) -> Path:
++    for _label, filename in run_ke24.STEPS:
++        path = root / filename
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.write_text("# fixture\n", encoding="utf-8")
++    for filename in run_ke24.PREVIEW_FILES:
++        path = root / filename
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.write_text("# fixture\n", encoding="utf-8")
++    return root
++
++
++def _env():
++    return {
++        "KE24_DRIVE_RAW_FOLDER_ID": "raw-folder",
++        "KE24_DRIVE_PROCESSED_FOLDER_ID": "processed-folder",
++        "KE24_DRIVE_ALERTS_FOLDER_ID": "alerts-folder",
++    }
++
++
++def test_exclusive_preview_rejects_second_process_and_cleans_up(tmp_path):
++    lock = tmp_path / "data/curated/.ke24_preview.lock"
++    with exclusive_preview(tmp_path, "first"):
++        assert lock.is_file()
++        with pytest.raises(PreviewAlreadyRunning):
++            with exclusive_preview(tmp_path, "second"):
++                pytest.fail("Duplicated process admitted")
++    assert not lock.exists()
++
++
++def test_exclusive_preview_cleans_up_after_error(tmp_path):
++    lock = tmp_path / "data/curated/.ke24_preview.lock"
++    with pytest.raises(ValueError):
++        with exclusive_preview(tmp_path, "first"):
++            raise ValueError("test interruption")
++    assert not lock.exists()
++
++
++def test_report_stores_only_safe_aggregate_metrics(tmp_path):
++    write_preview_report(
++        tmp_path, run_id="abcd1234", started_at=datetime.now(timezone.utc),
++        duration_seconds=1.5, status="SUCCESS", result={
++            "candidate_count": 83,
++            "secret_key": "SHOULD_NOT_APPEAR",
++            "raw_file_id": "SHOULD_NOT_APPEAR",
++            "processed_rows": 2105,
++            "history_new": -1,
++        },
++    )
++    raw = report_file(tmp_path).read_text(encoding="utf-8")
++    result = read_preview_report(tmp_path)
++    assert "SHOULD_NOT_APPEAR" not in raw
++    assert result["metrics"] == {"processed_rows": 2105, "candidate_count": 83}
++    assert result["status"] == "SUCCESS"
++
++
++def test_preview_success_records_status_and_releases_lock(tmp_path, monkeypatch):
++    _fake_project(tmp_path)
++    invoked = []
++    monkeypatch.setattr(run_ke24, "_open_read_only_drive", lambda: ("service", {}, {}, b"secret"))
++    monkeypatch.setattr(
++        run_ke24, "execute_readonly_stages",
++        lambda *args: invoked.append(args) or {"candidate_count": 83, "processed_rows": 2105},
++    )
++    assert run_ke24.run_preview(tmp_path, _env()) == 0
++    assert len(invoked) == 1
++    result = read_preview_report(tmp_path)
++    assert result["status"] == "SUCCESS"
++    assert result["metrics"] == {"processed_rows": 2105, "candidate_count": 83}
++    assert not (tmp_path / "data/curated/.ke24_preview.lock").exists()
++
++
++def test_preview_failure_is_sanitized_and_releases_lock(tmp_path, monkeypatch):
++    _fake_project(tmp_path)
++    monkeypatch.setattr(run_ke24, "_open_read_only_drive", lambda: ("service", {}, {}, b"secret"))
++    def fail(*_args):
++        raise RuntimeError("Sensitive Drive ID: SECRET-UNSAFE")
++    monkeypatch.setattr(run_ke24, "execute_readonly_stages", fail)
++    assert run_ke24.run_preview(tmp_path, _env()) == 1
++    assert read_preview_report(tmp_path)["status"] == "FAILED"
++    assert "SECRET-UNSAFE" not in report_file(tmp_path).read_text(encoding="utf-8")
++    assert not (tmp_path / "data/curated/.ke24_preview.lock").exists()
++
++
++def test_preview_blocks_when_new_raw_is_uncommitted(tmp_path, monkeypatch):
++    _fake_project(tmp_path)
++    monkeypatch.setattr(run_ke24, "_open_read_only_drive", lambda: ("service", {}, {}, b"secret"))
++    monkeypatch.setattr(
++        run_ke24, "execute_readonly_stages",
++        lambda *args: (_ for _ in ()).throw(run_ke24.PreviewBlocked("new source")),
++    )
++    assert run_ke24.run_preview(tmp_path, _env()) == 1
++    assert read_preview_report(tmp_path)["status"] == "BLOCKED"
++
++
++def test_interrupted_preview_is_recorded_without_publication(tmp_path, monkeypatch):
++    _fake_project(tmp_path)
++    monkeypatch.setattr(run_ke24, "_open_read_only_drive", lambda: ("service", {}, {}, b"secret"))
++    monkeypatch.setattr(
++        run_ke24, "execute_readonly_stages",
++        lambda *args: (_ for _ in ()).throw(KeyboardInterrupt()),
++    )
++    assert run_ke24.run_preview(tmp_path, _env()) == 130
++    assert read_preview_report(tmp_path)["status"] == "INTERRUPTED"
++    assert not (tmp_path / "data/curated/.ke24_preview.lock").exists()
++
++
++def test_existing_lock_prevents_drive_connection_and_preserves_report(tmp_path, monkeypatch):
++    _fake_project(tmp_path)
++    lock = tmp_path / "data/curated/.ke24_preview.lock"
++    with exclusive_preview(tmp_path, "active"):
++        monkeypatch.setattr(run_ke24, "_open_read_only_drive", lambda: pytest.fail("Drive must not connect"))
++        assert run_ke24.run_preview(tmp_path, _env()) == 1
++        assert lock.is_file()
++        assert not report_file(tmp_path).exists()
++    assert not lock.exists()
++
++
++def test_status_mode_does_not_contact_drive(tmp_path, monkeypatch):
++    monkeypatch.setattr(run_ke24, "_open_read_only_drive", lambda: pytest.fail("Do not authenticate"))
++    assert run_ke24.run_last_status(tmp_path) == 1
++    write_preview_report(
++        tmp_path, run_id="offline123", started_at=datetime.now(timezone.utc),
++        duration_seconds=1.0, status="BLOCKED",
++    )
++    assert run_ke24.run_last_status(tmp_path) == 0
++
++
++def test_dry_run_does_not_create_local_status_file(tmp_path):
++    _fake_project(tmp_path)
++    assert run_ke24.run_dry_run(tmp_path, _env()) == 0
++    assert not (tmp_path / "data/curated").exists()

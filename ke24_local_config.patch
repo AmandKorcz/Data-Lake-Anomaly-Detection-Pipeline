@@ -1,0 +1,39 @@
+diff --git a/.gitignore b/.gitignore
+--- a/.gitignore
++++ b/.gitignore
+@@ -7,6 +7,7 @@ __pycache__/
+ # Environment / credentials
+ .env
+ .env.*
++/config/.env
+ credentials/
+ secrets/
+ *.key
+diff --git a/src/ingestion/google_drive_client.py b/src/ingestion/google_drive_client.py
+--- a/src/ingestion/google_drive_client.py
++++ b/src/ingestion/google_drive_client.py
+@@ -12,4 +12,9 @@ from io import BytesIO
+ import pandas as pd
+ from googleapiclient.http import MediaIoBaseDownload
+ 
++from src.config.ke24_local_settings import load_ke24_local_settings
++
++# Compartilha os IDs locais com os comandos de ingestao, modelos e Sheets.
++load_ke24_local_settings()
++
+ OAUTH_DIR = Path.home() / "AppData/Local/KE24/oauth"
+diff --git a/src/pipeline/run_ke24.py b/src/pipeline/run_ke24.py
+--- a/src/pipeline/run_ke24.py
++++ b/src/pipeline/run_ke24.py
+@@ -19,6 +19,11 @@ from time import perf_counter
+ from types import SimpleNamespace
+ from uuid import uuid4
+ 
++from src.config.ke24_local_settings import load_ke24_local_settings
++
++# Um unico arquivo local para o CLI; os dados nunca sao exibidos nos logs.
++load_ke24_local_settings()
++
+ ROOT = Path(__file__).resolve().parents[2]
+ LOG = logging.getLogger("ke24.orchestrator")
+ 

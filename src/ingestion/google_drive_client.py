@@ -12,6 +12,11 @@ from io import BytesIO
 import pandas as pd
 from googleapiclient.http import MediaIoBaseDownload
 
+from src.config.ke24_local_settings import load_ke24_local_settings
+
+# Compartilha os IDs locais com os comandos de ingestao, modelos e Sheets.
+load_ke24_local_settings()
+
 OAUTH_DIR = Path.home() / "AppData/Local/KE24/oauth"
 
 CLIENT_FILE = OAUTH_DIR / "oauth-client.json"
