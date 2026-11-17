@@ -24,6 +24,13 @@ SAFE_METRICS = (
     "history_existing",
     "history_new",
     "sheet_rows",
+    "classification_total",
+    "classification_pending",
+    "classification_experimental",
+    "classification_ready",
+    "priority_high",
+    "priority_medium",
+    "priority_low",
 )
 
 

@@ -1,0 +1,391 @@
+diff --git a/src/pipeline/ke24_business_classification_preview.py b/src/pipeline/ke24_business_classification_preview.py
+new file mode 100644
+index 0000000..3f8c73a
+--- /dev/null
++++ b/src/pipeline/ke24_business_classification_preview.py
+@@ -0,0 +1,50 @@
++"""Resumo seguro da classificacao financeira opcional na previa do KE24.
++
++Nunca armazena medidas, documentos, empresas ou regras privadas.
++"""
++
++import pandas as pd
++
++
++LEVELS = frozenset({"LOW", "MEDIUM", "HIGH", "PENDING"})
++STATUSES = frozenset({
++    "EXPERIMENTAL_CLASSIFICATION",
++    "PENDING_BUSINESS_RULE",
++    "PENDING_TECHNICAL_RULE",
++    "PENDING_BUSINESS_VALIDATION",
++    "READY_FOR_FINAL_CLASSIFICATION",
++})
++
++
++def summarize_classified_candidates(classified, expected_count):
++    """Devolve somente contagens inteiras, nunca dados financeiros.
++
++    `HIGH` representa prioridade estimada, nao uma anomalia validada.
++    """
++    if type(expected_count) is not int or expected_count < 0:
++        raise ValueError("Quantidade esperada de candidatos invalida.")
++    if not isinstance(classified, pd.DataFrame):
++        raise ValueError("Resultado da classificacao indisponivel.")
++    if classified.columns.duplicated().any():
++        raise ValueError("Colunas duplicadas na classificacao.")
++    if not {"alert_level", "classification_status"}.issubset(classified.columns):
++        raise ValueError("Campos de classificacao ausentes.")
++    if len(classified) != expected_count:
++        raise ValueError("A classificacao alterou a quantidade de candidatos.")
++
++    levels = classified["alert_level"].astype("string")
++    statuses = classified["classification_status"].astype("string")
++    if (levels.isna().any() or statuses.isna().any()
++            or not levels.isin(LEVELS).all()
++            or not statuses.isin(STATUSES).all()):
++        raise ValueError("Nivel ou status de classificacao invalido.")
++
++    return {
++        "classification_total": expected_count,
++        "classification_pending": int(statuses.str.startswith("PENDING").sum()),
++        "classification_experimental": int(statuses.eq("EXPERIMENTAL_CLASSIFICATION").sum()),
++        "classification_ready": int(statuses.eq("READY_FOR_FINAL_CLASSIFICATION").sum()),
++        "priority_high": int(levels.eq("HIGH").sum()),
++        "priority_medium": int(levels.eq("MEDIUM").sum()),
++        "priority_low": int(levels.eq("LOW").sum()),
++    }
+diff --git a/src/pipeline/ke24_preview_execution_guard.py b/src/pipeline/ke24_preview_execution_guard.py
+index 0acd3c6..6de3ae0 100644
+--- a/src/pipeline/ke24_preview_execution_guard.py
++++ b/src/pipeline/ke24_preview_execution_guard.py
+@@ -24,6 +24,13 @@ SAFE_METRICS = (
+     "history_existing",
+     "history_new",
+     "sheet_rows",
++    "classification_total",
++    "classification_pending",
++    "classification_experimental",
++    "classification_ready",
++    "priority_high",
++    "priority_medium",
++    "priority_low",
+ )
+ 
+ 
+diff --git a/src/pipeline/run_ke24.py b/src/pipeline/run_ke24.py
+index 01b77fd..6daec33 100644
+--- a/src/pipeline/run_ke24.py
++++ b/src/pipeline/run_ke24.py
+@@ -188,6 +188,7 @@ def _live_adapters():
+         load_alert_history_state,
+     )
+     from src.loading.ke24_looker_sheet import build_matrix
++    from src.ml.load_ke24_alert_rules import load_protected_alert_rules
+ 
+     return SimpleNamespace(
+         load_processed=load_verified_processed_dataframe,
+@@ -197,11 +198,13 @@ def _live_adapters():
+         load_history=load_alert_history_state,
+         append_alerts=append_new_alerts,
+         sheet_matrix=build_matrix,
++        load_rules=load_protected_alert_rules,
+     )
+ 
+ 
+ def execute_readonly_stages(
+-    service, privacy_policy, schema, secret_key, *, adapters=None, source_audit=None
++    service, privacy_policy, schema, secret_key, *, adapters=None, source_audit=None,
++    classify=False,
+ ):
+     """Uma unica leitura do processed e uma unica previa de ML.
+ 
+@@ -224,9 +227,38 @@ def execute_readonly_stages(
+     with _timed_stage("Feature engineering em memoria"):
+         dataset, feature_manifest, stats = adapters.build_features(processed, privacy_policy)
+ 
++    # Regras de negocio sao opt-in, privadas e carregadas apenas uma vez.
++    protected_rules = None
++    if classify:
++        with _timed_stage("Carregamento de regras financeiras privadas"):
++            try:
++                protected_rules = adapters.load_rules()
++            except (RuntimeError, FileNotFoundError, ValueError):
++                raise PreviewBlocked(
++                    "Regras financeiras privadas indisponiveis; "
++                    "verifique o arquivo externo e a politica aprovada."
++                ) from None
++
+     with _timed_stage("Modelo e previa de candidatos (treino temporal em memoria)"):
+-        preview = adapters.build_alert_preview(dataset, feature_manifest, privacy_policy)
++        if classify:
++            preview = adapters.build_alert_preview(
++                dataset, feature_manifest, privacy_policy,
++                protected_rules=protected_rules,
++            )
++        else:
++            preview = adapters.build_alert_preview(dataset, feature_manifest, privacy_policy)
++
++    classification_summary = None
++    if classify:
++        from src.pipeline.ke24_business_classification_preview import (
++            summarize_classified_candidates,
++        )
++        with _timed_stage("Resumo agregado de classificacao (somente previa)"):
++            classification_summary = summarize_classified_candidates(
++                preview.get("classified"), preview["candidate_count"]
++            )
+ 
++    # Nunca persistir niveis experimentais no historico. Mantem PENDING.
+     with _timed_stage("Historico de alertas - simulacao, sem persistir"):
+         current = adapters.build_pending_outputs(
+             preview["candidates"], privacy_policy, datetime.now(timezone.utc)
+@@ -250,6 +282,18 @@ def execute_readonly_stages(
+         "history_new": newly_detected,
+         "sheet_rows": max(0, len(matrix) - 1),
+     }
++    if classification_summary is not None:
++        result.update(classification_summary)
++        LOG.info(
++            "CLASSIFICACAO (PREVIA): total=%d, pendentes=%d, "
++            "experimentais=%d, prontas_para_revisao=%d, "
++            "prioridade_alta=%d, media=%d, baixa=%d",
++            result["classification_total"], result["classification_pending"],
++            result["classification_experimental"], result["classification_ready"],
++            result["priority_high"], result["priority_medium"],
++            result["priority_low"],
++        )
++        LOG.warning("Classificacao nao valida erro financeiro nem altera o historico.")
+     LOG.info(
+         "RESUMO: processed=%d, treino=%d, validacao=%d, candidatos=%d, "
+         "estaveis=%d, alertas_novos=%d, linhas_previstas_Sheets=%d",
+@@ -272,7 +316,7 @@ def _open_read_only_drive():
+     return service, policy, schema, secret_key
+ 
+ 
+-def run_preview(root=ROOT, environ=None):
++def run_preview(root=ROOT, environ=None, *, classify=False):
+     env = os.environ if environ is None else environ
+     run_id = uuid4().hex[:12]
+     LOG.info("KE24 | preview integrado SOMENTE LEITURA | run_id=%s", run_id)
+@@ -298,7 +342,12 @@ def run_preview(root=ROOT, environ=None):
+         with exclusive_preview(root, run_id):
+             try:
+                 service, policy, schema, secret_key = _open_read_only_drive()
+-                result = execute_readonly_stages(service, policy, schema, secret_key)
++                if classify:
++                    result = execute_readonly_stages(
++                        service, policy, schema, secret_key, classify=True
++                    )
++                else:
++                    result = execute_readonly_stages(service, policy, schema, secret_key)
+             except PreviewBlocked as exc:
+                 status, failure_kind = "BLOCKED", "PreviewBlocked"
+                 LOG.error("BLOQUEADO: %s", exc)
+@@ -350,7 +399,10 @@ def run_last_status(root=ROOT):
+     for key, value in status.get("metrics", {}).items():
+         if key in {"processed_rows", "train_rows", "validation_rows",
+                    "candidate_count", "stable_all_seeds", "history_existing",
+-                   "history_new", "sheet_rows"} and type(value) is int:
++                   "history_new", "sheet_rows", "classification_total",
++                   "classification_pending", "classification_experimental",
++                   "classification_ready", "priority_high", "priority_medium",
++                   "priority_low"} and type(value) is int:
+             LOG.info("  %s: %d", key, value)
+     return 0
+ 
+@@ -364,7 +416,13 @@ def main(argv=None):
+         help="Consulta Drive e executa ML/historico/planilha em memoria; NAO publica",
+     )
+     modes.add_argument("--last-run", action="store_true", help="Mostra o ultimo status local, sem acessar o Drive")
++    parser.add_argument(
++        "--classify", action="store_true",
++        help="Apenas com --preview: usa regras privadas externas para classificar em memoria",
++    )
+     args = parser.parse_args(argv)
++    if args.classify and not args.preview:
++        parser.error("--classify requer --preview.")
+     logging.basicConfig(
+         level=logging.INFO, stream=sys.stdout,
+         format="%(asctime)s | %(levelname)s | %(message)s",
+@@ -373,7 +431,7 @@ def main(argv=None):
+         return run_dry_run()
+     if args.last_run:
+         return run_last_status()
+-    return run_preview()
++    return run_preview(classify=True) if args.classify else run_preview()
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/tests/test_ke24_business_classification_preview.py b/tests/test_ke24_business_classification_preview.py
+new file mode 100644
+index 0000000..266faba
+--- /dev/null
++++ b/tests/test_ke24_business_classification_preview.py
+@@ -0,0 +1,167 @@
++"""Testes locais: nao usam Drive, Sheets ou regras financeiras reais."""
++from datetime import datetime, timezone
++from types import SimpleNamespace
++
++import pandas as pd
++import pytest
++
++from src.pipeline.ke24_business_classification_preview import (
++    summarize_classified_candidates,
++)
++from src.pipeline import run_ke24
++from src.pipeline.ke24_preview_execution_guard import read_preview_report
++
++
++def _classified():
++    return pd.DataFrame([
++        {"alert_level": "HIGH", "classification_status": "EXPERIMENTAL_CLASSIFICATION"},
++        {"alert_level": "MEDIUM", "classification_status": "PENDING_BUSINESS_RULE"},
++        {"alert_level": "PENDING", "classification_status": "PENDING_TECHNICAL_RULE"},
++        {"alert_level": "LOW", "classification_status": "READY_FOR_FINAL_CLASSIFICATION"},
++        {"alert_level": "HIGH", "classification_status": "PENDING_BUSINESS_VALIDATION"},
++    ])
++
++
++def test_summary_contains_only_counts():
++    result = summarize_classified_candidates(_classified(), 5)
++    assert result == {
++        "classification_total": 5,
++        "classification_pending": 3,
++        "classification_experimental": 1,
++        "classification_ready": 1,
++        "priority_high": 2,
++        "priority_medium": 1,
++        "priority_low": 1,
++    }
++    assert all(type(value) is int for value in result.values())
++
++
++def test_empty_classification_is_valid():
++    result = summarize_classified_candidates(
++        pd.DataFrame(columns=["alert_level", "classification_status"]), 0
++    )
++    assert all(value == 0 for value in result.values())
++
++
++@pytest.mark.parametrize("bad", [
++    pd.DataFrame([{"alert_level": "HIGH", "classification_status": "NOT_A_STATUS"}]),
++    pd.DataFrame([{"alert_level": "URGENT", "classification_status": "PENDING_BUSINESS_RULE"}]),
++    pd.DataFrame([{"alert_level": None, "classification_status": "PENDING_BUSINESS_RULE"}]),
++    pd.DataFrame([{"alert_level": "HIGH"}]),
++])
++def test_invalid_classification_is_blocked(bad):
++    with pytest.raises(ValueError):
++        summarize_classified_candidates(bad, 1)
++
++
++def test_mismatched_candidate_count_is_blocked():
++    with pytest.raises(ValueError, match="quantidade"):
++        summarize_classified_candidates(_classified(), 4)
++
++
++def _adapters(candidates, *, rules=None, load_error=None):
++    actions = []
++
++    def rules_loader():
++        actions.append("rules")
++        if load_error is not None:
++            raise load_error
++        return rules
++
++    def model(*args, **kwargs):
++        actions.append("model")
++        assert len(args) == 3
++        if "protected_rules" in kwargs:
++            assert kwargs["protected_rules"] is rules
++            return {
++                "candidates": candidates,
++                "candidate_count": len(candidates),
++                "stable_all_seeds": 1,
++                "classified": _classified().iloc[:len(candidates)].copy(),
++            }
++        return {"candidates": candidates, "candidate_count": len(candidates), "stable_all_seeds": 1}
++
++    def pending(candidates_received, *args):
++        actions.append("pending")
++        assert "alert_level" not in candidates_received.columns
++        return {"history": candidates_received}
++
++    adapters = SimpleNamespace(
++        load_processed=lambda *args: pd.DataFrame({"safe": [1]}),
++        build_features=lambda *args: (pd.DataFrame({"safe": [1]}), "features", {"train_rows": 1, "validation_rows": 1}),
++        build_alert_preview=model,
++        build_pending_outputs=pending,
++        load_history=lambda *args: SimpleNamespace(history=pd.DataFrame({"safe": []})),
++        append_alerts=lambda old, cur, *a: (cur, len(cur)),
++        sheet_matrix=lambda *args: [["header"], [1]],
++        load_rules=rules_loader,
++    )
++    return adapters, actions
++
++
++def test_explicit_classification_reuses_ml_and_leaves_history_pending():
++    candidates = pd.DataFrame({"safe": [10, 20]})
++    rules = {"fictional": "approved test only"}
++    adapters, actions = _adapters(candidates, rules=rules)
++    result = run_ke24.execute_readonly_stages(
++        object(), {}, {}, b"test-secret", adapters=adapters,
++        source_audit=lambda *args: {"raw_files": 4, "processed_files": 4},
++        classify=True,
++    )
++    assert actions == ["rules", "model", "pending"]
++    assert result["classification_total"] == 2
++    assert result["classification_pending"] == 1
++    assert result["candidate_count"] == 2
++
++
++def test_default_preview_does_not_load_rules():
++    candidates = pd.DataFrame({"safe": [10, 20]})
++    adapters, actions = _adapters(candidates)
++    result = run_ke24.execute_readonly_stages(
++        object(), {}, {}, b"key", adapters=adapters,
++        source_audit=lambda *args: {"raw_files": 4, "processed_files": 4},
++    )
++    assert actions == ["model", "pending"]
++    assert "classification_total" not in result
++
++
++def test_missing_rules_blocks_before_model_and_history():
++    candidates = pd.DataFrame({"safe": [10]})
++    adapters, actions = _adapters(candidates, load_error=FileNotFoundError("LOCAL_PATH_MUST_BE_HIDDEN"))
++    with pytest.raises(run_ke24.PreviewBlocked, match="Regras financeiras privadas") as exc:
++        run_ke24.execute_readonly_stages(
++            object(), {}, {}, b"key", adapters=adapters,
++            source_audit=lambda *args: {"raw_files": 4, "processed_files": 4},
++            classify=True,
++        )
++    assert "LOCAL_PATH_MUST_BE_HIDDEN" not in str(exc.value)
++    assert actions == ["rules"]
++
++
++def test_cli_rejects_classify_without_preview():
++    with pytest.raises(SystemExit) as exc:
++        run_ke24.main(["--dry-run", "--classify"])
++    assert exc.value.code == 2
++
++
++def test_cli_passes_classify_flag(monkeypatch):
++    seen = []
++    monkeypatch.setattr(run_ke24, "run_preview", lambda **kw: seen.append(kw) or 0)
++    assert run_ke24.main(["--preview", "--classify"]) == 0
++    assert seen == [{"classify": True}]
++
++
++def test_report_writes_only_counts_and_no_private_data(tmp_path):
++    from src.pipeline.ke24_preview_execution_guard import write_preview_report
++    write_preview_report(
++        tmp_path, run_id="test123", started_at=datetime.now(timezone.utc),
++        duration_seconds=2.0, status="SUCCESS", result={
++            **summarize_classified_candidates(_classified(), 5),
++            "company_code": "TKN_must_not_log",
++            "private_threshold": 999999,
++        },
++    )
++    report = read_preview_report(tmp_path)
++    assert report["metrics"]["classification_total"] == 5
++    assert "company_code" not in report["metrics"]
++    assert "private_threshold" not in report["metrics"]
