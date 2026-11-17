@@ -39,6 +39,11 @@ from src.processing.prepare_ke24_processed import (
 from io import BytesIO
 
 from src.loading.ke24_drive_manifest import load_processed_manifest
+from src.loading.ke24_drive_source_selection import collect_new_drive_frames
+from src.loading.ke24_drive_incremental_publish import (
+    preview_incremental_publication,
+    publish_incremental_batch,
+)
 from src.loading.ke24_drive_publish import (
     preview_first_publication,
     publish_initial_batch,
@@ -86,10 +91,16 @@ def main():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument(
+    publish_modes = parser.add_mutually_exclusive_group()
+    publish_modes.add_argument(
         "--publish-initial",
         action="store_true",
         help="Publica a primeira carga no Google Drive.",
+    )
+    publish_modes.add_argument(
+        "--publish-incremental",
+        action="store_true",
+        help="Publica somente novos lotes em processed existente (escrita explicita).",
     )
 
     args = parser.parse_args()
@@ -108,47 +119,40 @@ def main():
         cache_discovery=False,
     )
 
+    # O manifesto e validado antes de ler qualquer XLSX.
+    loaded_manifest = load_processed_manifest(service)
+    if args.publish_initial and not loaded_manifest.empty:
+        raise RuntimeError(
+            "--publish-initial nao pode atualizar uma pasta processed existente. "
+            "Use --publish-incremental para adicionar novos lotes."
+        )
+    if args.publish_incremental and loaded_manifest.empty:
+        raise RuntimeError(
+            "--publish-incremental exige manifesto anterior valido; "
+            "primeira carga usa fluxo separado."
+        )
+
     files = list_raw_xlsx_files(service)
+    print(f"Arquivos encontrados: {len(files)} (nomes omitidos)")
 
-    if not files:
-        raise ValueError("Nenhum arquivo XLSX encontrado na pasta raw.")
-
-    print(f"Arquivos encontrados: {len(files)}")
-
-    dataframes = []
-    expected_columns = list(schema["columns"])
-
-    for index, file in enumerate(files, start=1):
-        print(f"\nProcessando arquivo {index}/{len(files)}")
-
-        # Recebe o Excel diretamente em memória.
-        with read_xlsx_from_drive(service, file["id"]) as buffer:
-            df, mapping, columns, row_count = process_ke24_file(
-                buffer,
-                expected_columns=expected_columns,
-                source_name=file["name"],
-            )
-
-        # Aplica a política de proteção existente.
-        protected_df = anonymize_ke24_dataframe(
-            df=df,
-            policy=policy,
-            schema=privacy_schema,
-            secret_key=secret_key,
-        )
-
-        validate_protected_dataset(
-            protected_df,
-            policy,
-            require_all_columns=True,
-        )
-
-        dataframes.append(protected_df)
-
-        print(
-            f"Arquivo {index}: "
-            f"{len(protected_df)} registros protegidos."
-        )
+    dataframes, selection = collect_new_drive_frames(
+        service,
+        files,
+        loaded_manifest,
+        secret_key,
+        expected_columns=list(schema["columns"]),
+        privacy_policy=policy,
+        privacy_schema=privacy_schema,
+        download=read_xlsx_from_drive,
+        parse=process_ke24_file,
+        anonymize=anonymize_ke24_dataframe,
+        validate=validate_protected_dataset,
+    )
+    print(f"Arquivos ja processados: {selection['skipped_files']}")
+    print(f"Arquivos novos: {selection['new_files']}")
+    if not dataframes:
+        print("Nenhum arquivo novo para processar. Nenhum upload realizado.")
+        return
 
     # Consolida somente os dados já protegidos.
     staging = pd.concat(
@@ -177,13 +181,12 @@ def main():
     manifest = build_file_manifest(staging)
 
 
-    # Consulta o manifesto persistente no Google Drive.
-    loaded_manifest = load_processed_manifest(service)
-
     plan = plan_incremental_load(
         staging_df=staging,
         loaded_manifest=loaded_manifest,
     )
+    if plan["new_files"] != selection["new_files"] or plan["skipped_files"]:
+        raise RuntimeError("Selecao de origem e plano incremental divergentes.")
 
 
     # Prepara o manifesto futuro, preservando cargas antigas.
@@ -207,7 +210,7 @@ def main():
     print(f"Total após publicação: {len(updated_manifest)}")
     print("\nPlanejamento incremental:")
     print(f"Arquivos novos: {plan['new_files']}")
-    print(f"Arquivos já processados: {plan['skipped_files']}")
+    print(f"Arquivos já processados: {selection['skipped_files']}")
     print(f"Registros novos: {len(plan['new_rows'])}")
 
     # Usa somente os registros ainda não publicados.
@@ -265,6 +268,30 @@ def main():
 
             else:
                 print("\nModo de verificação: nenhum upload.")
+        else:
+            incremental_plan = preview_incremental_publication(
+                read_service=service,
+                loaded_manifest=loaded_manifest,
+                new_manifest=new_manifest,
+                parquet_buffer=parquet_buffer,
+                processed_row_count=len(processed),
+            )
+            if args.publish_incremental:
+                write_service = build(
+                    "drive",
+                    "v3",
+                    credentials=authenticate_write(),
+                    cache_discovery=False,
+                )
+                publish_incremental_batch(
+                    read_service=service,
+                    write_service=write_service,
+                    plan=incremental_plan,
+                    parquet_buffer=parquet_buffer,
+                )
+                print("\nLote incremental publicado e validado.")
+            else:
+                print("\nModo de verificacao incremental: nenhum upload.")
 
     print(f"Registros processados: {len(processed)}")
     print(f"Colunas processadas: {len(processed.columns)}")
@@ -273,9 +300,9 @@ def main():
     print("\nValidação concluída!")
     print("Status: APROVADO")
 
-    print(f"Arquivos validados: {len(files)}")
+    print(f"Arquivos novos validados: {selection['new_files']}")
     print(f"Registros consolidados: {len(staging)}")
-    print(f"Extrações no manifesto: {len(manifest)}")
+    print(f"Novas extrações no manifesto planejado: {len(manifest)}")
     
 if __name__ == "__main__":
     main()

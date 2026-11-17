@@ -1,0 +1,405 @@
+--- a/src/loading/ke24_drive_source_selection.py
++++ b/src/loading/ke24_drive_source_selection.py
+@@ -61,3 +61,80 @@
+         raise ValueError("Extrações com conteúdo repetido na pasta raw; revisão necessária.")
+     seen_tokens.add(protected)
+     return protected not in committed
++
++
++def collect_new_drive_frames(
++    service,
++    source_files,
++    loaded_manifest,
++    secret_key,
++    *,
++    expected_columns,
++    privacy_policy,
++    privacy_schema,
++    download,
++    parse,
++    anonymize,
++    validate,
++    hash_function=None,
++    token_function=None,
++):
++    """Lê o XLSX apenas quando sua origem ainda não está no manifesto.
++
++    Os bytes chegam do Drive em memória. Todos os arquivos são verificados por
++    hash protegido; somente os novos são interpretados pelo pandas. A função
++    não publica nem grava artefatos. Retorna quadros protegidos e contagens.
++    """
++    if not source_files:
++        raise ValueError("A pasta raw do Drive não possui extrações XLSX.")
++
++    seen_tokens = set()
++    new_frames = []
++    skipped = 0
++
++    for source in source_files:
++        if not isinstance(source, dict) or not source.get("id") or not source.get("name"):
++            raise ValueError("Metadados de extração do Drive inválidos.")
++
++        with download(service, source["id"]) as buffer:
++            before = seen_tokens.copy()
++            is_new = should_process_source(
++                buffer,
++                loaded_manifest,
++                seen_tokens,
++                secret_key,
++                hash_function=hash_function,
++                token_function=token_function,
++            )
++            if not is_new:
++                skipped += 1
++                continue
++
++            selected_token = next(iter(seen_tokens - before))
++            df, *_ = parse(
++                buffer,
++                expected_columns=expected_columns,
++                source_name=source["name"],
++            )
++
++        protected = anonymize(
++            df=df,
++            policy=privacy_policy,
++            schema=privacy_schema,
++            secret_key=secret_key,
++        )
++        validate(protected, privacy_policy, require_all_columns=True)
++        if (
++            protected.empty
++            or FILE_ID not in protected.columns
++            or protected[FILE_ID].isna().any()
++            or set(protected[FILE_ID].astype(str)) != {selected_token}
++        ):
++            raise ValueError("Identificador da extração diverge dos bytes recebidos do Drive.")
++        new_frames.append(protected)
++
++    return new_frames, {
++        "raw_files": len(source_files),
++        "new_files": len(new_frames),
++        "skipped_files": skipped,
++    }
+--- a/src/pipeline/run_ke24_drive_ingestion.py
++++ b/src/pipeline/run_ke24_drive_ingestion.py
+@@ -39,6 +39,7 @@
+ from io import BytesIO
+ 
+ from src.loading.ke24_drive_manifest import load_processed_manifest
++from src.loading.ke24_drive_source_selection import collect_new_drive_frames
+ from src.loading.ke24_drive_publish import (
+     preview_first_publication,
+     publish_initial_batch,
+@@ -106,47 +107,35 @@
+         cache_discovery=False,
+     )
+ 
+-    files = list_raw_xlsx_files(service)
+-
+-    if not files:
+-        raise ValueError("Nenhum arquivo XLSX encontrado na pasta raw.")
+-
+-    print(f"Arquivos encontrados: {len(files)}")
+-
+-    dataframes = []
+-    expected_columns = list(schema["columns"])
+-
+-    for index, file in enumerate(files, start=1):
+-        print(f"\nProcessando arquivo {index}/{len(files)}")
+-
+-        # Recebe o Excel diretamente em memória.
+-        with read_xlsx_from_drive(service, file["id"]) as buffer:
+-            df, mapping, columns, row_count = process_ke24_file(
+-                buffer,
+-                expected_columns=expected_columns,
+-                source_name=file["name"],
+-            )
+-
+-        # Aplica a política de proteção existente.
+-        protected_df = anonymize_ke24_dataframe(
+-            df=df,
+-            policy=policy,
+-            schema=privacy_schema,
+-            secret_key=secret_key,
+-        )
+-
+-        validate_protected_dataset(
+-            protected_df,
+-            policy,
+-            require_all_columns=True,
++    # O manifesto e validado antes de ler qualquer XLSX.
++    loaded_manifest = load_processed_manifest(service)
++    if args.publish_initial and not loaded_manifest.empty:
++        raise RuntimeError(
++            "--publish-initial nao pode atualizar uma pasta processed existente. "
++            "Publicacao incremental exige fluxo separado e revisado."
+         )
+ 
+-        dataframes.append(protected_df)
++    files = list_raw_xlsx_files(service)
++    print(f"Arquivos encontrados: {len(files)} (nomes omitidos)")
+ 
+-        print(
+-            f"Arquivo {index}: "
+-            f"{len(protected_df)} registros protegidos."
+-        )
++    dataframes, selection = collect_new_drive_frames(
++        service,
++        files,
++        loaded_manifest,
++        secret_key,
++        expected_columns=list(schema["columns"]),
++        privacy_policy=policy,
++        privacy_schema=privacy_schema,
++        download=read_xlsx_from_drive,
++        parse=process_ke24_file,
++        anonymize=anonymize_ke24_dataframe,
++        validate=validate_protected_dataset,
++    )
++    print(f"Arquivos ja processados: {selection['skipped_files']}")
++    print(f"Arquivos novos: {selection['new_files']}")
++    if not dataframes:
++        print("Nenhum arquivo novo para processar. Nenhum upload realizado.")
++        return
+ 
+     # Consolida somente os dados já protegidos.
+     staging = pd.concat(
+@@ -175,13 +164,12 @@
+     manifest = build_file_manifest(staging)
+ 
+ 
+-    # Consulta o manifesto persistente no Google Drive.
+-    loaded_manifest = load_processed_manifest(service)
+-
+     plan = plan_incremental_load(
+         staging_df=staging,
+         loaded_manifest=loaded_manifest,
+     )
++    if plan["new_files"] != selection["new_files"] or plan["skipped_files"]:
++        raise RuntimeError("Selecao de origem e plano incremental divergentes.")
+ 
+ 
+     # Prepara o manifesto futuro, preservando cargas antigas.
+@@ -205,7 +193,7 @@
+     print(f"Total após publicação: {len(updated_manifest)}")
+     print("\nPlanejamento incremental:")
+     print(f"Arquivos novos: {plan['new_files']}")
+-    print(f"Arquivos já processados: {plan['skipped_files']}")
++    print(f"Arquivos já processados: {selection['skipped_files']}")
+     print(f"Registros novos: {len(plan['new_rows'])}")
+ 
+     # Usa somente os registros ainda não publicados.
+@@ -263,6 +251,8 @@
+ 
+             else:
+                 print("\nModo de verificação: nenhum upload.")
++        else:
++            print("\nModo de verificação incremental: nenhum upload.")
+ 
+     print(f"Registros processados: {len(processed)}")
+     print(f"Colunas processadas: {len(processed.columns)}")
+@@ -271,9 +261,9 @@
+     print("\nValidação concluída!")
+     print("Status: APROVADO")
+ 
+-    print(f"Arquivos validados: {len(files)}")
++    print(f"Arquivos novos validados: {selection['new_files']}")
+     print(f"Registros consolidados: {len(staging)}")
+-    print(f"Extrações no manifesto: {len(manifest)}")
++    print(f"Novas extrações no manifesto planejado: {len(manifest)}")
+     
+ if __name__ == "__main__":
+     main()
+--- /dev/null
++++ b/tests/test_ke24_drive_selection_integration.py
+@@ -0,0 +1,133 @@
++"""Testes offline da coleta incremental; nunca usa OAuth, Drive ou publica."""
++
++import hashlib
++from io import BytesIO
++
++import pandas as pd
++import pytest
++
++from src.loading.ke24_drive_source_selection import collect_new_drive_frames
++from src.loading.plan_ke24_incremental import FILE_ID, MANIFEST_COLUMNS
++
++SECRET = b"x" * 32
++
++
++def _digest_bytes(buffer):
++    position = buffer.tell()
++    try:
++        buffer.seek(0)
++        return hashlib.sha256(buffer.read()).hexdigest()
++    finally:
++        buffer.seek(position)
++
++
++def _protected_digest(*, value, column, company, secret_key):
++    assert column == FILE_ID
++    assert company is None
++    assert secret_key == SECRET
++    return "TKN_" + hashlib.sha256(value.encode()).hexdigest()[:32]
++
++
++def _protected_id(content):
++    return _protected_digest(value=hashlib.sha256(content).hexdigest(),
++                             column=FILE_ID, company=None, secret_key=SECRET)
++
++
++def _manifest(*values):
++    return pd.DataFrame([{FILE_ID: v} for v in values], columns=MANIFEST_COLUMNS)
++
++
++def _fixture(contents, *, corrupt_protection=False):
++    calls = {"download": [], "parse": [], "anonymize": [], "validate": []}
++    sources = [{"id": f"remote-{i}", "name": f"test-{i}.xlsx"}
++               for i in range(len(contents))]
++
++    def download(_service, source_id):
++        calls["download"].append(source_id)
++        return BytesIO(contents[int(source_id.split("-")[-1])])
++
++    def parse(buffer, *, expected_columns, source_name):
++        calls["parse"].append(source_name)
++        assert expected_columns == ["period", "sales_quantity"]
++        digest = hashlib.sha256(buffer.getvalue()).hexdigest()
++        return pd.DataFrame({"raw_digest": [digest]}), None, [], 1
++
++    def anonymize(*, df, policy, schema, secret_key):
++        calls["anonymize"].append(True)
++        assert secret_key == SECRET
++        result = df.copy()
++        token = _protected_digest(value=result["raw_digest"].iloc[0],
++                                  column=FILE_ID, company=None, secret_key=SECRET)
++        result[FILE_ID] = "TKN_" + "f" * 32 if corrupt_protection else token
++        return result
++
++    def validate(frame, policy, *, require_all_columns):
++        calls["validate"].append(True)
++        assert require_all_columns is True
++        assert not frame.empty
++
++    return sources, dict(
++        expected_columns=["period", "sales_quantity"],
++        privacy_policy={}, privacy_schema={},
++        download=download, parse=parse, anonymize=anonymize, validate=validate,
++        hash_function=_digest_bytes, token_function=_protected_digest,
++    ), calls
++
++
++def test_committed_files_skip_excel_parsing_and_protection():
++    contents = [b"registered-A", b"registered-B"]
++    files, adapters, calls = _fixture(contents)
++    frames, counts = collect_new_drive_frames(
++        object(), files, _manifest(*map(_protected_id, contents)), SECRET,
++        **adapters,
++    )
++    assert frames == []
++    assert counts == {"raw_files": 2, "new_files": 0, "skipped_files": 2}
++    assert len(calls["download"]) == 2  # sha256 precisa dos bytes da API
++    assert calls["parse"] == calls["anonymize"] == calls["validate"] == []
++
++
++def test_mixed_files_parse_only_new_and_validate_protected_hash():
++    content = [b"old", b"new-A", b"new-B"]
++    files, adapters, calls = _fixture(content)
++    frames, counts = collect_new_drive_frames(
++        object(), files, _manifest(_protected_id(b"old")), SECRET,
++        **adapters,
++    )
++    assert counts == {"raw_files": 3, "new_files": 2, "skipped_files": 1}
++    assert len(frames) == 2
++    assert [f[FILE_ID].iloc[0] for f in frames] == [
++        _protected_id(b"new-A"), _protected_id(b"new-B")
++    ]
++    assert calls["parse"] == ["test-1.xlsx", "test-2.xlsx"]
++    assert len(calls["anonymize"]) == len(calls["validate"]) == 2
++
++
++def test_first_load_previews_all_files_without_write():
++    files, adapters, calls = _fixture([b"a", b"b"])
++    frames, counts = collect_new_drive_frames(
++        object(), files, _manifest(), SECRET, **adapters,
++    )
++    assert len(frames) == 2 and counts["new_files"] == 2
++    assert counts["skipped_files"] == 0
++
++
++def test_duplicate_raw_bytes_stop_even_if_old():
++    files, adapters, _ = _fixture([b"same", b"same"])
++    with pytest.raises(ValueError, match="repetido"):
++        collect_new_drive_frames(object(), files, _manifest(_protected_id(b"same")), SECRET,
++                                 **adapters)
++
++
++def test_unexpected_protected_source_blocks_flow():
++    files, adapters, _ = _fixture([b"new"], corrupt_protection=True)
++    with pytest.raises(ValueError, match="diverge"):
++        collect_new_drive_frames(object(), files, _manifest(), SECRET,
++                                 **adapters)
++
++
++def test_empty_raw_blocks_and_does_not_read():
++    _, adapters, calls = _fixture([])
++    with pytest.raises(ValueError, match="não possui"):
++        collect_new_drive_frames(object(), [], _manifest(), SECRET, **adapters)
++    assert calls["download"] == calls["parse"] == []
+--- /dev/null
++++ b/tests/test_ke24_drive_ingestion_selection_flow.py
+@@ -0,0 +1,53 @@
++"""Verifica que o CLI nao processa nem publica extracoes ja commitadas."""
++
++import hashlib
++from io import BytesIO
++import sys
++
++import pandas as pd
++import pytest
++
++from src.pipeline import run_ke24_drive_ingestion as runner
++from src.loading.plan_ke24_incremental import FILE_ID, MANIFEST_COLUMNS
++from src.privacy.anonymize_ke24 import generate_token
++
++KEY = b"a" * 32
++
++
++def _source_token(payload):
++    digest = hashlib.sha256(payload).hexdigest()
++    return generate_token(digest, FILE_ID, None, KEY)
++
++
++def _setup_committed(monkeypatch):
++    payload = b"already-registered-XLSX"
++    manifest = pd.DataFrame([{FILE_ID: _source_token(payload)}], columns=MANIFEST_COLUMNS)
++    monkeypatch.setattr(runner, "load_privacy_runtime", lambda: ({}, {}, KEY))
++    monkeypatch.setattr(runner, "load_schema", lambda: {"columns": ["period", "sales_quantity"]})
++    monkeypatch.setattr(runner, "load_quality_rules", lambda: {})
++    monkeypatch.setattr(runner, "authenticate", lambda: object())
++    monkeypatch.setattr(runner, "build", lambda *args, **kwargs: object())
++    monkeypatch.setattr(runner, "load_processed_manifest", lambda service: manifest)
++    monkeypatch.setattr(runner, "list_raw_xlsx_files", lambda service: [{"id": "id1", "name": "remote.xlsx"}])
++    monkeypatch.setattr(runner, "read_xlsx_from_drive", lambda service, file_id: BytesIO(payload))
++    monkeypatch.setattr(runner, "process_ke24_file", lambda *args, **kwargs: pytest.fail("Nao reabrir XLSX"))
++    monkeypatch.setattr(runner, "anonymize_ke24_dataframe", lambda **kwargs: pytest.fail("Nao reanonimizar"))
++    monkeypatch.setattr(runner, "authenticate_write", lambda: pytest.fail("Nao autenticar escrita"))
++    monkeypatch.setattr(runner, "publish_initial_batch", lambda **kwargs: pytest.fail("Nao publicar"))
++
++
++def test_cli_skips_committed_without_excel_or_write(monkeypatch, capsys):
++    _setup_committed(monkeypatch)
++    monkeypatch.setattr(sys, "argv", ["run_ke24_drive_ingestion"])
++    runner.main()
++    output = capsys.readouterr().out
++    assert "Arquivos novos: 0" in output
++    assert "Arquivos ja processados: 1" in output
++    assert "Nenhum arquivo novo" in output
++
++
++def test_cli_blocks_initial_publish_with_existing_manifest(monkeypatch):
++    _setup_committed(monkeypatch)
++    monkeypatch.setattr(sys, "argv", ["run_ke24_drive_ingestion", "--publish-initial"])
++    with pytest.raises(RuntimeError, match="--publish-initial"):
++        runner.main()
