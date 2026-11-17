@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = ROOT / "src" / "pipeline" / "run_ke24.py"
 MARKER = "KE24_RAW_PARALLEL_AUDIT_V1"
-INSTALLER_VERSION = "4.0.1"
+INSTALLER_VERSION = "4.0.2"
 
 OLD_BLOCK = '''    raw_tokens = set()
 
@@ -64,21 +64,63 @@ PARALLEL_ENTRY = '''    use_parallel = (
 '''
 
 
+def _has_complete_integration(text):
+    tree = ast.parse(text)
+    functions = [
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "audit_drive_sources"
+    ]
+    if len(functions) != 1:
+        return False
+    body = functions[0].body
+
+    expected_assignment = ast.parse(
+        "def _expected():\n" + PARALLEL_ENTRY + "        pass\n"
+    ).body[0].body[0]
+    expected_parallel_if = ast.parse(
+        "def _expected():\n" + NEW_BLOCK
+    ).body[0].body[0]
+
+    assignments = [
+        node for node in body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "use_parallel"
+                for target in node.targets)
+    ]
+    parallel_branches = [
+        node for node in body
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Name)
+        and node.test.id == "use_parallel"
+    ]
+    dump = lambda node: ast.dump(node, include_attributes=False)
+    return (
+        len(assignments) == 1
+        and len(parallel_branches) == 1
+        and dump(assignments[0]) == dump(expected_assignment)
+        and dump(parallel_branches[0]) == dump(expected_parallel_if)
+        and text.count("    missing = raw_tokens - committed\n") == 1
+        and OLD_BLOCK not in text
+    )
+
+
 def transform_source(text):
-    if MARKER in text:
+    if _has_complete_integration(text):
         return text, False
-    if text.count(ORIGINAL_ENTRY) != 1 or text.count(OLD_BLOCK) != 1:
-        raise ValueError("Versao do run_ke24.py nao compativel. Nenhuma alteracao aplicada.")
+
+    if (
+        MARKER in text
+        or "use_parallel = (" in text
+        or "audit_raw_sources_parallel(" in text
+        or text.count(ORIGINAL_ENTRY) != 1
+        or text.count(OLD_BLOCK) != 1
+    ):
+        raise ValueError("Versao do run_ke24.py divergente ou integracao parcial. Nenhuma alteracao aplicada.")
+
     updated = text.replace(ORIGINAL_ENTRY, PARALLEL_ENTRY, 1)
     updated = updated.replace(OLD_BLOCK, NEW_BLOCK, 1)
-    if (
-        MARKER not in updated
-        or updated.count(MARKER) != 1
-        or updated.count("if use_parallel:") != 1
-        or updated.count("else:\n        raw_tokens = set()") != 1
-    ):
-        raise ValueError("A transformacao nao inseriu o bloco completo. Nada foi alterado.")
-    ast.parse(updated)
+    if updated.count(MARKER) != 1 or not _has_complete_integration(updated):
+        raise ValueError("A transformacao nao gerou a integracao completa. Nada foi alterado.")
     return updated, True
 
 
@@ -118,7 +160,12 @@ def _self_test():
     )
     transformed, changed = transform_source(fixture)
     again, second_change = transform_source(transformed)
-    if not changed or second_change or again != transformed:
+    missing_marker = transformed.replace(
+        "    # KE24_RAW_PARALLEL_AUDIT_V1: usa verificacao estrita em paralelo apenas\n"
+        "    # no caminho real. Testes com dependencias injetadas seguem sequenciais.\n", ""
+    )
+    accepted, accepted_change = transform_source(missing_marker)
+    if not changed or second_change or again != transformed or accepted_change or accepted != missing_marker:
         raise ValueError("Autoverificacao de idempotencia reprovada.")
     print(f"Instalador {INSTALLER_VERSION}: AUTOVERIFICACAO APROVADA. Nenhum arquivo alterado.")
     return 0
