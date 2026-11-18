@@ -1,3 +1,4 @@
+# KE24_PROCESSED_SINGLE_PASS_V1: verificacao e uso dos mesmos bytes Parquet.
 # KE24_DRIVE_READ_RETRY_V1: leituras somente leitura com retry limitado.
 from src.pipeline.ke24_drive_read_retry import execute_drive_read
 import hashlib
@@ -12,7 +13,6 @@ from src.ingestion.google_drive_client import authenticate
 from src.loading.ke24_drive_manifest import (
     MANIFEST_NAME,
     list_processed_files,
-    load_processed_manifest,
     validate_manifest_document,
 )
 from src.loading.plan_ke24_incremental import (
@@ -45,12 +45,10 @@ def _manifest_signature(manifest):
 
 def load_verified_processed_dataframe(service, privacy_policy, privacy_schema):
     
-    # Esta função já verifica a integridade e os arquivos esperados na pasta.
-    registered = load_processed_manifest(service)
-    if registered.empty:
-        raise RuntimeError("Nenhum lote processed publicado no Google Drive.")
-
+    # Verifica cada Parquet uma unica vez e usa esses MESMOS bytes para leitura.
     files = list_processed_files(service)
+    if not files:
+        raise RuntimeError("Nenhum lote processed publicado no Google Drive.")
     manifest_files = [item for item in files if item["name"] == MANIFEST_NAME]
     if len(manifest_files) != 1:
         raise RuntimeError("Manifesto remoto ausente ou duplicado.")
@@ -60,14 +58,11 @@ def load_verified_processed_dataframe(service, privacy_policy, privacy_schema):
     ))
     document = json.loads(raw_manifest.decode("utf-8"))
     documented = validate_manifest_document(document)
-    if _manifest_signature(documented) != _manifest_signature(registered):
-        raise RuntimeError("Manifesto foi alterado durante a leitura; execução bloqueada.")
-
     expected_ids = {manifest_files[0]["id"]} | {
         batch["parquet_id"] for batch in document["batches"]
     }
     remote = {item["id"]: item for item in files}
-    if set(remote) != expected_ids:
+    if set(remote) != expected_ids or len(remote) != len(files):
         raise RuntimeError("Arquivos do processed divergentes do manifesto.")
 
     processed_frames = []
@@ -112,8 +107,22 @@ def load_verified_processed_dataframe(service, privacy_policy, privacy_schema):
         processed, privacy_policy, require_all_columns=True
     )
     actual_manifest = build_file_manifest(processed)
-    if _manifest_signature(actual_manifest) != _manifest_signature(registered):
+    if _manifest_signature(actual_manifest) != _manifest_signature(documented):
         raise RuntimeError("Registros e manifesto não correspondem.")
+
+    # Bloqueia alteracoes no manifesto ou na composicao da pasta durante a leitura.
+    # O reread e apenas do pequeno manifesto, nunca dos Parquets ja validados.
+    final_manifest = execute_drive_read(
+        lambda: service.files().get_media(fileId=manifest_files[0]["id"])
+    )
+    if final_manifest != raw_manifest:
+        raise RuntimeError("Manifesto foi alterado durante a leitura; execução bloqueada.")
+
+    final_files = list_processed_files(service)
+    if sorted((item["id"], item["name"]) for item in final_files) != sorted(
+        (item["id"], item["name"]) for item in files
+    ):
+        raise RuntimeError("Pasta processed alterada durante a leitura; execução bloqueada.")
 
     return processed
 
