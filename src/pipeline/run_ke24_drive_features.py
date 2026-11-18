@@ -1,3 +1,5 @@
+# KE24_DRIVE_READ_RETRY_V1: leituras somente leitura com retry limitado.
+from src.pipeline.ke24_drive_read_retry import execute_drive_read
 import hashlib
 import json
 from io import BytesIO
@@ -53,9 +55,9 @@ def load_verified_processed_dataframe(service, privacy_policy, privacy_schema):
     if len(manifest_files) != 1:
         raise RuntimeError("Manifesto remoto ausente ou duplicado.")
 
-    raw_manifest = service.files().get_media(
+    raw_manifest = execute_drive_read(lambda: service.files().get_media(
         fileId=manifest_files[0]["id"]
-    ).execute()
+    ))
     document = json.loads(raw_manifest.decode("utf-8"))
     documented = validate_manifest_document(document)
     if _manifest_signature(documented) != _manifest_signature(registered):
@@ -74,7 +76,9 @@ def load_verified_processed_dataframe(service, privacy_policy, privacy_schema):
         if remote[parquet_id]["name"] != batch["parquet_name"]:
             raise RuntimeError("Nome remoto de Parquet inconsistente.")
 
-        payload = service.files().get_media(fileId=parquet_id).execute()
+        payload = execute_drive_read(
+            lambda: service.files().get_media(fileId=parquet_id)
+        )
         if (
             len(payload) != batch["byte_count"]
             or hashlib.sha256(payload).hexdigest() != batch["parquet_sha256"]

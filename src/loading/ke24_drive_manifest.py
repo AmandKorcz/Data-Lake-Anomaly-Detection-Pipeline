@@ -1,3 +1,5 @@
+# KE24_DRIVE_READ_RETRY_V1: leituras somente leitura com retry limitado.
+from src.pipeline.ke24_drive_read_retry import execute_drive_read
 import hashlib
 import json
 import os
@@ -37,12 +39,12 @@ def list_processed_files(service):
     files = []
     page_token = None
     while True:
-        page = service.files().list(
+        page = execute_drive_read(lambda: service.files().list(
             q=f"'{folder_id}' in parents and trashed = false",
             fields="nextPageToken,files(id,name,mimeType)",
             pageSize=100,
             pageToken=page_token,
-        ).execute()
+        ))
         files.extend(page.get("files", []))
         page_token = page.get("nextPageToken")
         if not page_token:
@@ -163,7 +165,9 @@ def load_processed_manifest(service):
         print("Pasta processed vazia. Primeira carga identificada.")
         return pd.DataFrame(columns=MANIFEST_COLUMNS)
 
-    content = service.files().get_media(fileId=manifests[0]["id"]).execute()
+    content = execute_drive_read(
+        lambda: service.files().get_media(fileId=manifests[0]["id"])
+    )
     document = json.loads(content.decode("utf-8"))
     manifest = validate_manifest_document(document)
 
@@ -180,7 +184,9 @@ def load_processed_manifest(service):
             raise RuntimeError("Nome de Parquet divergente do manifesto.")
 
         # Verificação forte. Para lotes grandes, substituir por leitura em chunks.
-        payload = service.files().get_media(fileId=batch["parquet_id"]).execute()
+        payload = execute_drive_read(
+            lambda: service.files().get_media(fileId=batch["parquet_id"])
+        )
         if len(payload) != batch["byte_count"] or hashlib.sha256(payload).hexdigest() != batch["parquet_sha256"]:
             raise RuntimeError("Integridade do Parquet comprometida: reconciliação necessária.")
 
