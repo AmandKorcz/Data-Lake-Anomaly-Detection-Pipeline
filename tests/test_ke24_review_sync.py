@@ -139,11 +139,13 @@ def test_change_to_technical_origin_blocks():
         sync.plan_review_sheet_sync(changed, [], state, trusted_snapshot=state)
 
 
-def test_skipping_pending_to_corrected_blocks():
+@pytest.mark.parametrize("status", ["IN_REVIEW", "CONFIRMED_ERROR", "CORRECTED", "NOT_AN_ERROR"])
+def test_pending_can_go_directly_to_any_other_status(status):
     state = snapshot()
-    changed = edit_rows(state, 1, "CORRECTED")
-    with pytest.raises(ValueError, match="transicoes"):
-        sync.plan_review_sheet_sync(alerts((A,)), [], changed, trusted_snapshot=state)
+    changed = edit_rows(state, 1, status)
+    plan = sync.plan_review_sheet_sync(alerts((A,)), [], changed, trusted_snapshot=state)
+    assert plan.pending_requests == ((A, status, 0),)
+    assert plan.desired_matrix[1][-1] == status
 
 
 def test_invalid_formula_blocks():
@@ -207,4 +209,3 @@ def test_demo_is_offline_and_counts_only(capsys):
     assert "Novos alertas: 1" in result
     assert "ALT_" not in result
     assert "REV_" not in result
-    

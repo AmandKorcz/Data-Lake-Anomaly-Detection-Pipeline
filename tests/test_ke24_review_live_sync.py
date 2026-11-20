@@ -77,12 +77,15 @@ def test_unknown_alert_blocks_without_api_write(tmp_path):
     assert api.appends == 0
 
 
-def test_invalid_status_transition_blocks(tmp_path):
+def test_direct_status_change_is_preserved_when_new_alert_is_added(tmp_path):
     api, drive, path = setup(tmp_path, (A,))
     api.matrix[1][-1] = 'CORRECTED'
-    with pytest.raises(ValueError):
-        sync(api, drive, path, (A, B), publish=True)
-    assert api.appends == 0
+    result = sync(api, drive, path, (A, B), publish=True)
+    assert result['new_alerts'] == 1
+    assert api.appends == 1
+    assert api.matrix[1][-1] == 'CORRECTED'
+    assert api.matrix[2][-1] == 'PENDING'
+    assert snap.load_snapshot(KEY, SID, 7, path=path)[1][-1] == 'CORRECTED'
 
 
 def test_missing_trusted_baseline_never_creates_one(tmp_path):

@@ -9,7 +9,6 @@ from src.review.ke24_review_sheet import (
     SHEET_COLUMNS, build_review_sheet_matrix,
     validate_review_sheet_matrix,
 )
-from src.review.ke24_review_workflow import TRANSITIONS
 
 
 @dataclass(frozen=True)
@@ -24,7 +23,6 @@ class ReviewSheetPlan:
 def plan_review_sheet_sync(alerts, events, observed_matrix=None, *, trusted_snapshot=None):
     canonical = build_review_sheet_matrix(alerts, events)
     current_by_id = validate_review_sheet_matrix(canonical)
-    # Primeira publicacao: nenhuma aba existente e nenhum snapshot anterior.
     if observed_matrix is None or observed_matrix == []:
         if trusted_snapshot not in (None, []):
             raise ValueError("Fila existente desapareceu; reconciliacao manual necessaria.")
@@ -58,10 +56,7 @@ def plan_review_sheet_sync(alerts, events, observed_matrix=None, *, trusted_snap
         requested = actual[-1]
         if is_official_update and not is_new_request:
             requested = row[4]
-        # Se uma solicitacao anterior permanecer, nunca apagá-la silenciosamente.
         if requested != row[4]:
-            if (row[4], requested) not in TRANSITIONS:
-                raise ValueError("Solicitacao fora das transicoes permitidas.")
             proposals.append((alert_id, requested, row[5]))
         generated.append([*row[:-1], requested])
 
