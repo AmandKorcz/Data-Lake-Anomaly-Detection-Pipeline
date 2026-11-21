@@ -39,7 +39,10 @@ As informações detalhadas sobre requisitos, arquitetura, regras de negócio, t
 
 - 📄 [RFC — Documentação e Especificação do Projeto](https://docs.google.com/document/d/1t2XLt_Ihgp2Lqg98UlWBZv_qZmI6pyEhC30nf8SUBhY/edit?tab=t.0)
 - 📋 [Jira — Planejamento e Acompanhamento](https://amandakorczagin.atlassian.net/jira/software/projects/KAN/boards/1)
+- 📋 [LookerStudio - Dashboard de Alertas](https://datastudio.google.com/u/0/reporting/a2c17195-6985-4bb3-92ce-c44ffe977a6e/page/p_4jup8vsh9d)
 
 ---
 
 **Projeto acadêmico desenvolvido no curso de Engenharia de Software da Católica de Santa Catarina.**
+
+ 
