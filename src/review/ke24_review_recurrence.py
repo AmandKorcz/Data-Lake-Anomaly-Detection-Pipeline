@@ -89,6 +89,45 @@ def _business_key(row, *, allow_missing_document=False):
     )
 
 
+
+def _valid_source_row_number(row):
+    try:
+        value = pd.to_numeric(row.get("_source_row_number"), errors="coerce")
+        if pd.isna(value) or not float(value).is_integer() or value < 2:
+            return None
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _provably_distinct_from_incomplete_history(current, historical_rows):
+    candidate_partial = _business_key(current, allow_missing_document=True)
+    if candidate_partial is None:
+        return False
+    candidate_partial = (candidate_partial[0], *candidate_partial[2:])
+    candidate_file = _protected(current.get("_source_file_sha256"), required=False)
+    candidate_line = _valid_source_row_number(current)
+    candidate_currency = str(current["currency"]).strip().upper()
+
+    for prior in historical_rows:
+        if _protected(prior["reference_document"], required=False) is not None:
+            return False  # Falta outro campo alem do documento.
+        prior_partial = _business_key(prior, allow_missing_document=True)
+        if prior_partial is None:
+            return False  # Falta informacao para diferenciar.
+        prior_partial = (prior_partial[0], *prior_partial[2:])
+        if candidate_partial == prior_partial:
+            return False  # Potencial recorrencia de negocio.
+        if str(prior["currency"]).strip().upper() != candidate_currency:
+            continue  # Moeda e parte obrigatoria do contrato de negocio.
+        prior_file = _protected(prior.get("_source_file_sha256"), required=False)
+        prior_line = _valid_source_row_number(prior)
+        if (candidate_file is None or prior_file != candidate_file
+                or candidate_line is None or prior_line is None
+                or candidate_line == prior_line):
+            return False  # Em exportacoes diferentes a diferenca parcial e incerta.
+    return True
+
 def _validate_frame(frame, label):
     if not isinstance(frame, pd.DataFrame) or frame.columns.duplicated().any():
         raise ValueError(f"{label}: estrutura invalida.")
@@ -119,7 +158,7 @@ def plan_business_recurrences(previous, current, statuses):
         return RecurrencePlan(current.copy(), 0, 0, 0, 0, 0, 0)
 
     old_keys = defaultdict(list)
-    unknown_old_scopes = set()
+    unknown_old_scopes = defaultdict(list)
     current_keys = defaultdict(list)
     current_partial_keys = defaultdict(list)
     old_rows = previous.to_dict(orient="records")
@@ -132,7 +171,7 @@ def plan_business_recurrences(previous, current, statuses):
         if key is not None:
             old_keys[key].append(row["alert_id"])
         else:
-            unknown_old_scopes.add((row["company_code"], row["period_key"]))
+            unknown_old_scopes[(row["company_code"], row["period_key"])].append(row)
     for row in new_rows:
         key = _business_key(row)
         if key is not None:
@@ -168,7 +207,14 @@ def plan_business_recurrences(previous, current, statuses):
                         and len(current_partial_keys[(partial[0], *partial[2:])]) == 1):
                     safe_unmatchable += 1
             elif (row["company_code"], row["period_key"]) in unknown_old_scopes:
-                ambiguous += 1
+                # Historico sem chave completa: so dispensa bloqueio mediante
+                # proveniencia comprovada, sem suprimir nem mesclar alertas.
+                scope = (row["company_code"], row["period_key"])
+                if not (key not in old_keys
+                        and len(current_keys[key]) == 1
+                        and _provably_distinct_from_incomplete_history(
+                            row, unknown_old_scopes[scope])):
+                    ambiguous += 1
             elif key in old_keys:
                 if len(old_keys[key]) == 1 and len(current_keys[key]) == 1:
                     prior_id = old_keys[key][0]

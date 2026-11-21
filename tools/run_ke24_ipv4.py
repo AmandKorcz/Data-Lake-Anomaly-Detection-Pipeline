@@ -14,6 +14,7 @@ ALLOWED_MODULES = (
     "src.pipeline.run_ke24_drive_alert_persistence",
     "src.review.run_ke24_review_sheet",
     "tools.ke24_review_context_tab",
+    "tools.diagnose_ke24_recurrence",
 )
 
 
