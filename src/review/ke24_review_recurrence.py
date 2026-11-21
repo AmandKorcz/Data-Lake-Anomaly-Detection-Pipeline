@@ -31,10 +31,12 @@ class RecurrencePlan:
     duplicates_pending: int
     ambiguous_candidates: int
     unmatchable_candidates: int
+    safe_unmatchable_candidates: int = 0
 
     @property
     def publication_blockers(self) -> int:
-        return self.ambiguous_candidates + self.unmatchable_candidates
+        return (self.ambiguous_candidates + self.unmatchable_candidates
+                - self.safe_unmatchable_candidates)
 
 
 def _protected(value, *, required):
@@ -55,10 +57,10 @@ def _amount(row, field):
     return value.normalize() if value.is_finite() else None
 
 
-def _business_key(row):
+def _business_key(row, *, allow_missing_document=False):
     company = _protected(row["company_code"], required=True)
     document = _protected(row["reference_document"], required=False)
-    if document is None:
+    if document is None and not allow_missing_document:
         return None
     period = str(row["period_key"]).strip()
     if not PERIOD.fullmatch(period):
@@ -119,8 +121,12 @@ def plan_business_recurrences(previous, current, statuses):
     old_keys = defaultdict(list)
     unknown_old_scopes = set()
     current_keys = defaultdict(list)
+    current_partial_keys = defaultdict(list)
     old_rows = previous.to_dict(orient="records")
     new_rows = current.to_dict(orient="records")
+    # Escopo histórico é suficiente para excluir recorrência entre competências
+    # distintas; nunca é suficiente para suprimir lançamentos na mesma competência.
+    old_scopes = {(row["company_code"], row["period_key"]) for row in old_rows}
     for row in old_rows:
         key = _business_key(row)
         if key is not None:
@@ -131,9 +137,15 @@ def plan_business_recurrences(previous, current, statuses):
         key = _business_key(row)
         if key is not None:
             current_keys[key].append(row["alert_id"])
+        # Chave parcial só detecta colisões potenciais dentro do lote atual;
+        # ela NUNCA autoriza suprimir um alerta ou afirmar que é recorrente.
+        partial = _business_key(row, allow_missing_document=True)
+        if partial is not None:
+            current_partial_keys[(partial[0], *partial[2:])].append(row["alert_id"])
 
     keep = []
     exact = cross_export = treated = pending = ambiguous = unmatchable = 0
+    safe_unmatchable = 0
     for row in new_rows:
         aid = row["alert_id"]
         prior_id = None
@@ -144,6 +156,17 @@ def plan_business_recurrences(previous, current, statuses):
             key = _business_key(row)
             if key is None:
                 unmatchable += 1
+                # A ausência de documento NÃO autoriza comparar por valores.
+                # Porém, sem histórico na mesma empresa e competência, não
+                # existe alerta anterior nesse escopo que possa ser recorrente.
+                # Ainda exigimos os demais campos e ausência de colisão parcial
+                # com outro candidato deste mesmo lote.
+                partial = _business_key(row, allow_missing_document=True)
+                if (partial is not None
+                        and _protected(row["reference_document"], required=False) is None
+                        and (row["company_code"], row["period_key"]) not in old_scopes
+                        and len(current_partial_keys[(partial[0], *partial[2:])]) == 1):
+                    safe_unmatchable += 1
             elif (row["company_code"], row["period_key"]) in unknown_old_scopes:
                 ambiguous += 1
             elif key in old_keys:
@@ -167,4 +190,5 @@ def plan_business_recurrences(previous, current, statuses):
         duplicates_pending=pending,
         ambiguous_candidates=ambiguous,
         unmatchable_candidates=unmatchable,
+        safe_unmatchable_candidates=safe_unmatchable,
     )

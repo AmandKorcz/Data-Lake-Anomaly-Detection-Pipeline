@@ -97,6 +97,8 @@ def main():
     print(f"Correspondencias entre exportacoes: {recurrence.matched_business}")
     print(f"Correspondencias ambiguas: {recurrence.ambiguous_candidates}")
     print(f"Sem identificacao de negocio suficiente: {recurrence.unmatchable_candidates}")
+    print(f"Sem documento, mas sem conflito com historico/lote: {recurrence.safe_unmatchable_candidates}")
+    print(f"Candidatos que exigem revisao antes de publicar: {recurrence.publication_blockers}")
     print(f"Alertas novos: {new_count}")
     print(f"Total de alertas no historico: {len(history)}")
     print(f"Registros preparados para dashboard: {len(dashboard)}")
