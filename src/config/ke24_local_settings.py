@@ -12,7 +12,10 @@ FOLDER_KEYS = (
     "KE24_DRIVE_PROCESSED_FOLDER_ID",
     "KE24_DRIVE_ALERTS_FOLDER_ID",
 )
-OPTIONAL_KEYS = ("KE24_LOOKER_SPREADSHEET_ID",)
+OPTIONAL_KEYS = (
+    "KE24_LOOKER_SPREADSHEET_ID",
+    "KE24_REVIEW_SPREADSHEET_ID",
+)
 SUPPORTED_KEYS = (*FOLDER_KEYS, *OPTIONAL_KEYS)
 ID_PATTERN = re.compile(r"[A-Za-z0-9_-]+\Z")
 
@@ -29,12 +32,14 @@ def _check_distinct_folders(values: dict[str, str]) -> None:
         raise ValueError("Pastas raw, processed e alerts precisam ter IDs diferentes.")
 
 
-def load_ke24_local_settings(path: Path = LOCAL_CONFIG) -> tuple[str, ...]:
-    """Carrega configuracoes permitidas; sem conexao, upload ou logging de IDs.
+def _check_distinct_sheets(values: dict[str, str]) -> None:
+    technical = values.get("KE24_LOOKER_SPREADSHEET_ID")
+    review = values.get("KE24_REVIEW_SPREADSHEET_ID")
+    if technical and review and technical == review:
+        raise ValueError("A planilha tecnica e a fila de revisao devem ter IDs diferentes.")
 
-    O arquivo local tem prioridade sobre variaveis do Windows. Se nao existir,
-    preserva o comportamento atual dos scripts.
-    """
+
+def load_ke24_local_settings(path: Path = LOCAL_CONFIG) -> tuple[str, ...]:
     path = Path(path)
     if not path.is_file():
         return ()
@@ -51,11 +56,13 @@ def load_ke24_local_settings(path: Path = LOCAL_CONFIG) -> tuple[str, ...]:
             continue
         updates[name] = _valid_id(name, raw_value)
 
-    effective = {name: os.environ.get(name, "").strip() for name in FOLDER_KEYS}
-    effective.update({name: value for name, value in updates.items() if name in FOLDER_KEYS})
-    _check_distinct_folders(effective)
+    effective_folders = {name: os.environ.get(name, "").strip() for name in FOLDER_KEYS}
+    effective_folders.update({name: value for name, value in updates.items() if name in FOLDER_KEYS})
+    _check_distinct_folders(effective_folders)
+    effective_sheets = {name: os.environ.get(name, "").strip() for name in OPTIONAL_KEYS}
+    effective_sheets.update({name: value for name, value in updates.items() if name in OPTIONAL_KEYS})
+    _check_distinct_sheets(effective_sheets)
 
-    # Evita aplicar apenas parte da configuracao em caso de arquivo invalido.
     os.environ.update(updates)
     return tuple(updates)
 
@@ -69,15 +76,13 @@ def save_from_environment(path: Path = LOCAL_CONFIG) -> tuple[str, ...]:
     if absent:
         raise ValueError("Variaveis ainda ausentes no terminal: " + ", ".join(absent))
 
-    values = {
-        name: _valid_id(name, os.environ[name])
-        for name in FOLDER_KEYS
-    }
+    values = {name: _valid_id(name, os.environ[name]) for name in FOLDER_KEYS}
     for name in OPTIONAL_KEYS:
         optional = os.environ.get(name, "").strip()
         if optional:
             values[name] = _valid_id(name, optional)
     _check_distinct_folders(values)
+    _check_distinct_sheets(values)
 
     content = (
         "# Configuracao LOCAL KE24. Nao enviar ao GitHub.\n"
@@ -85,7 +90,6 @@ def save_from_environment(path: Path = LOCAL_CONFIG) -> tuple[str, ...]:
         + "".join(f"{name}={value}\n" for name, value in values.items())
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Criacao exclusiva para nunca substituir IDs existentes inadvertidamente.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
