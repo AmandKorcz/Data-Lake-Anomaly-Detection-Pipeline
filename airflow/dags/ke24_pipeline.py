@@ -1,8 +1,11 @@
 from datetime import datetime
-from ke24_task_runner import executar_modulo
+from ke24_task_runner import executar_modulo, PYTHON_KE24, PROJECT_ROOT
 
 from airflow.sdk import dag, task
 
+import os
+import re
+import subprocess
 
 @dag(
     dag_id="ke24_anomaly_detection_pipeline",
@@ -14,27 +17,84 @@ from airflow.sdk import dag, task
     tags=["KE24", "Data Lake", "Machine Learning"],
 )
 def ke24_pipeline():
-  
-    
+
     @task
-    def ingestao():
-        executar_modulo(
-            modulo="src.pipeline.run_ke24_drive_ingestion",
-            descricao="Ingestao incremental KE24",
+    def preflight():
+        resultado = subprocess.run(
+            [
+                PYTHON_KE24,
+                "-m",
+                "tools.ke24_new_company_preflight",
+            ],
+            cwd=PROJECT_ROOT,
+            env={
+                **os.environ,
+                "PYTHONPATH": PROJECT_ROOT,
+            },
+            capture_output=True,
+            text=True,
             timeout=600,
+            check=False,
         )
 
+        if resultado.returncode != 0:
+            raise RuntimeError(
+                "Preflight KE24 reprovado. "
+                "Verifique a execucao em ambiente restrito."
+            )
+
+        if "Preflight E2E: APROVADO" not in resultado.stdout:
+            raise RuntimeError(
+                "Confirmacao de aprovacao do preflight ausente."
+            )
+
+        correspondencia = re.search(
+            r"^Extracoes novas:\s*(\d+)\s*$",
+            resultado.stdout,
+            re.MULTILINE,
+        )
+
+        if correspondencia is None:
+            raise RuntimeError(
+                "Quantidade de novas extracoes nao identificada."
+            )
+
+        novas_extracoes = int(correspondencia.group(1))
+
+        print(f"Preflight aprovado | Novas extracoes: {novas_extracoes}")
+
+        return novas_extracoes  
+
+    @task.branch
+    def decidir_fluxo(novas_extracoes: int):
+        if novas_extracoes == 0:
+            print("Nenhuma extracao nova. Continuando com dados existentes.")
+            return "validacao"
+
+        print(
+            f"{novas_extracoes} nova(s) extracao(oes) encontrada(s). "
+            "Publicacao manual necessaria antes de continuar."
+        )
+        return "aguardando_publicacao"
+
+    @task
+    def aguardando_publicacao():
+        raise RuntimeError(
+            "Novas extracoes detectadas. "
+            "Publicacao manual necessaria antes de continuar. "
+            "Nenhuma publicacao foi realizada pelo Airflow."
+        )
 
     @task
     def validacao():
         codigo = """
-    from src.privacy.privacy_runtime import load_privacy_runtime
-    from src.quality.validate_ke24 import load_schema, load_quality_rules
+            from src.privacy.privacy_runtime import load_privacy_runtime
+            from src.quality.validate_ke24 import load_schema, load_quality_rules
 
-    load_privacy_runtime()
-    load_schema()
-    load_quality_rules()
-    """
+            load_privacy_runtime()
+            load_schema()
+            load_quality_rules()
+        """
 
         executar_modulo(
             codigo=codigo,
@@ -49,15 +109,6 @@ def ke24_pipeline():
             modulo="src.pipeline.run_ke24_drive_features",
             descricao="Feature Engineering KE24",
             timeout=900,
-        )
-
-
-    @task
-    def machine_learning():
-        executar_modulo(
-            modulo="src.pipeline.run_ke24_drive_model",
-            descricao="Machine Learning KE24",
-            timeout=1200,
         )
 
 
@@ -105,15 +156,19 @@ def ke24_pipeline():
             timeout=180,
         )
 
+    resultado_preflight = preflight()
+    decisao = decidir_fluxo(resultado_preflight)
+
+    tarefa_validacao = validacao()
+    tarefa_aguardando = aguardando_publicacao()
+
+    decisao >> [tarefa_validacao, tarefa_aguardando]
+
     (
-        ingestao()
-        >> validacao()
+        tarefa_validacao
         >> processamento()
-        >> machine_learning()
         >> alertas()
         >> dashboard()
     )
 
-
 ke24_pipeline()
-
