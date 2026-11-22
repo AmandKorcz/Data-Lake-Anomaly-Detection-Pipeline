@@ -1,3 +1,5 @@
+# KE24_DRIVE_READ_RETRY_V1: leituras somente leitura com retry limitado.
+from src.pipeline.ke24_drive_read_retry import execute_drive_read
 from pathlib import Path
 
 from google.auth.transport.requests import Request
@@ -105,12 +107,12 @@ def list_raw_xlsx_files(service):
     page_token = None
 
     while True:
-        response = service.files().list(
+        response = execute_drive_read(lambda: service.files().list(
             q=query,
             fields="nextPageToken, files(id, name, mimeType)",
             pageSize=100,
             pageToken=page_token
-        ).execute()
+        ))
 
         files.extend(
             file

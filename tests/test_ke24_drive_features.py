@@ -1,3 +1,4 @@
+# KE24_PROCESSED_SINGLE_PASS_V1: fixtures de leitura unica.
 import hashlib
 import json
 
@@ -27,11 +28,7 @@ def test_manifest_signature_detects_divergence():
 
 
 def test_no_published_manifest_is_blocked(monkeypatch):
-    monkeypatch.setattr(
-        phase2,
-        "load_processed_manifest",
-        lambda service: pd.DataFrame(),
-    )
+    monkeypatch.setattr(phase2, "list_processed_files", lambda service: [])
     with pytest.raises(RuntimeError, match="Nenhum lote processed"):
         phase2.load_verified_processed_dataframe(object(), {}, {})
 
@@ -73,9 +70,6 @@ def test_corrupted_parquet_is_blocked_before_read(monkeypatch):
         def files(self):
             return Files()
 
-    monkeypatch.setattr(
-        phase2, "load_processed_manifest", lambda service: registered
-    )
     monkeypatch.setattr(
         phase2,
         "list_processed_files",
