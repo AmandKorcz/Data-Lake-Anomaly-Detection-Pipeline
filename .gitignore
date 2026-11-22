@@ -49,3 +49,11 @@ drive-token.json
 drive-write-token.json
 token.json
 client_secret*.json/config/ke24.keys.env
+
+/config/ke24.keys.env*.keys.env
+*.local.env
+*.private.env
+*.keys.env
+/config/ke24.keys.env
+
+client_secret*.json
