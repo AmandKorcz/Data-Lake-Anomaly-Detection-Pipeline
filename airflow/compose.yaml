@@ -1,0 +1,61 @@
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: ke24-airflow-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow_local_dev
+      POSTGRES_DB: airflow
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  airflow:
+    build:
+      context: ..
+      dockerfile: airflow/Dockerfile
+    image: ke24-airflow:local
+    container_name: ke24-airflow
+    restart: unless-stopped
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    command: standalone
+
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow_local_dev@postgres:5432/airflow
+      KE24_DRIVE_RAW_FOLDER_ID: "${KE24_DRIVE_RAW_FOLDER_ID}"
+      KE24_HMAC_KEY_FILE: /run/secrets/ke24_hmac_key
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/passwords.json
+
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    volumes:
+      - ./dags:/opt/airflow/dags:ro
+      - ../src:/opt/ke24/src:ro
+      - ../tools:/opt/ke24/tools:ro
+      - airflow_logs:/opt/airflow/logs
+      - "${LOCALAPPDATA}/KE24/airflow-oauth:/home/airflow/AppData/Local/KE24/oauth"
+      - ../config:/opt/ke24/config:ro
+      - "${KE24_HMAC_HOST_FILE}:/run/secrets/ke24_hmac_key:ro"
+      - ke24-airflow-auth:/opt/airflow/auth
+
+volumes:
+  postgres_data:
+  airflow_logs:
+  ke24-airflow-auth:
+    external: true
