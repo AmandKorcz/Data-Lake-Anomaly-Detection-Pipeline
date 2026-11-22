@@ -64,6 +64,7 @@ def test_duplicate_folder_ids_blocked(tmp_path, monkeypatch):
 
 def test_save_copies_only_allowed_identifiers_and_never_overwrites(tmp_path, monkeypatch):
     _set_folders(monkeypatch)
+    monkeypatch.delenv("KE24_REVIEW_SPREADSHEET_ID",raising=False)
     monkeypatch.setenv("KE24_LOOKER_SPREADSHEET_ID", "sheet_existing")
     monkeypatch.setenv("KE24_HMAC_KEY", "not-for-config")
     monkeypatch.setenv("KE24_OAUTH_TOKEN_FILE", "never-save-this")
