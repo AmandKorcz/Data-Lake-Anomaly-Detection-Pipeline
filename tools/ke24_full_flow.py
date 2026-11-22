@@ -21,7 +21,6 @@ MAX_REVIEW_ALERTS = 5000
 
 SEPARATOR = "-" * 68
 
-
 def stage_header(label: str) -> None:
     number, _, description = label.partition(" ")
     if "/" in number:
@@ -141,7 +140,6 @@ def execute(
     fast: bool = False,
     auto: bool = False,
 ) -> Summary:
-    """Executa o fluxo; auto escolhe fast ou completo apos o preflight."""
     writes: list[str] = []
     alerts_total: int | None = None
     start = time.monotonic()
@@ -154,8 +152,6 @@ def execute(
     print(SEPARATOR)
     pending_reviews = 0
     new_alerts = 0
-
-
 
     def step(label: str, module: str, *args: str, requires: str | None = None) -> str:
         stage_header(label)
@@ -189,9 +185,6 @@ def execute(
     new_rows = number(pre, "Registros novos")
     print(f"   Novas extracoes: {quantity(incoming)} | Novos registros: {quantity(new_rows)}")
 
-    # So a auditoria completa aprovada pode decidir qual caminho seguir.
-    # Nao usar apenas a lista de nomes/IDs do Drive para concluir que nao ha
-    # novos dados: hashes protegidos e manifesto precisam continuar verificados.
     if auto:
         if (incoming == 0) != (new_rows == 0):
             raise FlowStopped(
@@ -332,6 +325,113 @@ def execute(
     return Summary(True, None, tuple(writes), alerts_total)
 
 
+def check_saved_full_model(version: str, dataset, *, model_root=None):
+    from src.ml import prepare_ke24_training_matrix as training
+    from src.ml.ke24_model_store import load_model_bundle
+    from src.ml.ke24_training_fingerprint import compute_training_fingerprint
+    from src.pipeline.run_ke24_drive_model import FULL_MODEL_DIR
+
+    root = FULL_MODEL_DIR if model_root is None else model_root
+    bundle, manifest = load_model_bundle(root, version)
+    features = list(bundle.feature_columns)
+    matrix = training.build_training_matrix(dataset, features)
+    actual_fingerprint = compute_training_fingerprint(matrix, dataset)
+    if actual_fingerprint != bundle.training_fingerprint:
+        raise FlowStopped(
+            "O modelo salvo nao corresponde ao Processed atual. "
+            "Nao zere o historico ate revisar o retreinamento."
+        )
+    group_counts = dataset.groupby(["company_code", "currency"], sort=True).size().to_dict()
+    if group_counts != bundle.group_sizes or sum(group_counts.values()) != len(dataset):
+        raise FlowStopped("Os grupos do modelo nao correspondem ao Processed atual.")
+    if manifest.get("training_fingerprint") != actual_fingerprint:
+        raise FlowStopped("O manifesto do modelo nao corresponde ao Processed.")
+    return {
+        "version": version,
+        "rows": len(dataset),
+        "features": len(features),
+        "groups": len(group_counts),
+    }
+
+
+def check_alert_surfaces(history, observed, baseline, context):
+    from src.review.ke24_review_sheet import validate_review_sheet_matrix
+    from src.review.ke24_review_context_sync import validate_context_matrix
+    from src.review.ke24_review_sync import plan_review_sheet_sync
+
+    if history.empty:
+        raise FlowStopped("O historico ja esta vazio; nao ha alertas para reiniciar.")
+    old_ids = set(history["alert_id"])
+    if len(old_ids) != len(history):
+        raise FlowStopped("Alertas duplicados no historico oficial.")
+    existing = validate_review_sheet_matrix(observed)
+    signed = validate_review_sheet_matrix(baseline)
+    recorded = validate_context_matrix(context)
+    if set(existing) != old_ids or set(signed) != old_ids or set(recorded) != old_ids:
+        raise FlowStopped("Historico, fila assinada e contexto nao possuem os mesmos IDs.")
+    plan = plan_review_sheet_sync(history, [], observed, trusted_snapshot=baseline)
+    if plan.new_alert_count:
+        raise FlowStopped("A fila ainda possui alertas nao sincronizados.")
+    return {"alerts": len(history), "pending_reviews": plan.pending_request_count}
+
+
+def prepare_new_cycle(version: str):
+    from googleapiclient.discovery import build
+    from src.ingestion.google_drive_client import authenticate, authenticate_write
+    from src.loading.ke24_drive_alert_history import load_alert_history_state
+    from src.pipeline.run_ke24_drive_features import (
+        build_features_in_memory, load_verified_processed_dataframe,
+    )
+    from src.privacy.privacy_runtime import load_privacy_runtime
+    from src.review.ke24_review_google_sheets import (
+        get_spreadsheet_id, get_context_sheet_id,
+        read_review_sheet_matrix, read_private_context_matrix,
+        verify_private_review_sheet,
+    )
+    from src.review.ke24_review_trusted_snapshot import load_snapshot
+
+    print(f"\n{SEPARATOR}")
+    print("KE24 | PREPARACAO PARA NOVO CICLO")
+    print("   Somente verificacao. Nenhum alerta sera apagado.")
+    print(SEPARATOR)
+    policy, schema, key = load_privacy_runtime()
+    reader = build("drive", "v3", credentials=authenticate(), cache_discovery=False)
+    print("   [1/3] Conferindo modelo salvo e Processed...", flush=True)
+    processed = load_verified_processed_dataframe(reader, policy, schema)
+    dataset, _, _ = build_features_in_memory(processed, policy)
+    model = check_saved_full_model(version, dataset)
+    print(f"   OK | {quantity(model['rows'])} registros, {model['features']} features, {model['groups']} grupos")
+
+    print("   [2/3] Conferindo historico oficial...", flush=True)
+    state = load_alert_history_state(reader, policy)
+    print(f"   OK | {quantity(len(state.history))} alertas no Drive")
+
+    print("   [3/3] Conferindo fila e contexto...", flush=True)
+    credentials = authenticate_write()
+    sheets = build("sheets", "v4", credentials=credentials, cache_discovery=False)
+    drive_writer = build("drive", "v3", credentials=credentials, cache_discovery=False)
+    spreadsheet_id = get_spreadsheet_id()
+    queue_id = verify_private_review_sheet(sheets, drive_writer, spreadsheet_id)
+    context_id = get_context_sheet_id(sheets, drive_writer, spreadsheet_id)
+    if context_id is None:
+        raise FlowStopped("A aba de contexto nao existe; interromper para conferencia.")
+    baseline = load_snapshot(key, spreadsheet_id, queue_id)
+    queue = read_review_sheet_matrix(sheets, spreadsheet_id)
+    context = read_private_context_matrix(sheets, spreadsheet_id)
+    surfaces = check_alert_surfaces(state.history, queue, baseline, context)
+    print(f"   OK | {quantity(surfaces['alerts'])} alertas alinhados no historico, fila e contexto")
+    print(f"   Revisoes nao autenticadas: {quantity(surfaces['pending_reviews'])}")
+    print(f"\n{SEPARATOR}")
+    print("STATUS: PRONTO PARA PLANEJAR A LIMPEZA")
+    print(f"   Modelo conferido: {model['version']}")
+    print("   Modelo NAO ativado para os alertas.")
+    print("   Nenhum dado ou historico foi apagado.")
+    print("   Proxima fase: limpeza definitiva coordenada, com confirmacao explicita.")
+    print(SEPARATOR)
+    return {"model": model, "alerts": surfaces["alerts"],
+            "pending_reviews": surfaces["pending_reviews"]}
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Orquestracao serial KE24 com confirmacao por escrita"
@@ -339,6 +439,7 @@ def main(argv=None) -> int:
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--preview", action="store_true", help="Selecao automatica, sem publicacoes (padrao)")
     modes.add_argument("--guided", action="store_true", help="Publicacoes confirmadas uma a uma")
+    modes.add_argument("--prepare-new-cycle", action="store_true", help="Verifica modelo e alertas antes do reset; nao apaga nada")
     parser.add_argument(
         "--fast", action="store_true",
         help="Modo rapido manual anterior (opcional; padrao agora escolhe automaticamente)",
@@ -347,8 +448,16 @@ def main(argv=None) -> int:
         "--verbose", action="store_true",
         help="Exibe stdout integral; pode conter metadados privados",
     )
+    parser.add_argument("--model-version", help="Versao exata do modelo salvo, exigida com --prepare-new-cycle")
     args = parser.parse_args(argv)
+    if args.prepare_new_cycle and (not args.model_version or args.fast):
+        parser.error("--prepare-new-cycle exige --model-version e nao aceita --fast")
+    if args.model_version and not args.prepare_new_cycle:
+        parser.error("--model-version somente com --prepare-new-cycle")
     try:
+        if args.prepare_new_cycle:
+            prepare_new_cycle(args.model_version)
+            return 0
         report = execute(
             guided=args.guided,
             fast=args.fast,
