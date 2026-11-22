@@ -51,6 +51,14 @@ def prepare_alerts_respecting_reviews(current, previous_history, statuses, polic
     return history, new_count, suppressed
 
 
+
+def prepare_alerts_with_business_recurrence(current, previous_history, statuses, policy):
+    # KE24_BUSINESS_RECURRENCE_V1: não altera IDs ou registros históricos.
+    from src.review.ke24_review_recurrence import plan_business_recurrences
+    plan = plan_business_recurrences(previous_history, current, statuses)
+    history, new_count = append_new_alerts(previous_history, plan.eligible, policy)
+    return history, new_count, plan
+
 def main():
     parser = argparse.ArgumentParser(description="KE24: historico protegido de alertas no Drive")
     parser.add_argument(
@@ -75,7 +83,7 @@ def main():
         preview["candidates"], policy, datetime.now(timezone.utc)
     )["history"]
 
-    history, new_count, suppressed = prepare_alerts_respecting_reviews(
+    history, new_count, recurrence = prepare_alerts_with_business_recurrence(
         current, state.history, statuses, policy
     )
     dashboard = build_pretrained_dashboard(history, policy)
@@ -84,7 +92,13 @@ def main():
     print(f"Candidatos p95 (sinais estatisticos): {preview['candidate_count']}")
     print(f"Candidatos estaveis nas 5 seeds: {preview['stable_all_seeds']}")
     print(f"Alertas anteriores no Drive: {len(state.history)}")
-    print(f"Recorrencias ja tratadas na planilha: {suppressed}")
+    print(f"Recorrencias tratadas (ID ou identidade de negocio): {recurrence.suppressed_reviewed}")
+    print(f"Reapresentacoes ainda pendentes reconhecidas: {recurrence.duplicates_pending}")
+    print(f"Correspondencias entre exportacoes: {recurrence.matched_business}")
+    print(f"Correspondencias ambiguas: {recurrence.ambiguous_candidates}")
+    print(f"Sem identificacao de negocio suficiente: {recurrence.unmatchable_candidates}")
+    print(f"Sem documento, mas sem conflito com historico/lote: {recurrence.safe_unmatchable_candidates}")
+    print(f"Candidatos que exigem revisao antes de publicar: {recurrence.publication_blockers}")
     print(f"Alertas novos: {new_count}")
     print(f"Total de alertas no historico: {len(history)}")
     print(f"Registros preparados para dashboard: {len(dashboard)}")
@@ -92,8 +106,15 @@ def main():
     print("Classificacao financeira: PENDENTE de regras de negocio aprovadas.")
 
     if not args.publish:
+        if recurrence.publication_blockers:
+            print("ATENCAO: candidatos sem correspondencia segura; publicacao bloqueada ate revisao.")
         print("\nStatus: PREVIA APROVADA. Nenhum upload realizado.")
         return
+    if recurrence.publication_blockers:
+        raise RuntimeError(
+            "Publicacao bloqueada: identidade de negocio ausente ou ambigua. "
+            "Revise a previa antes de publicar novos alertas."
+        )
     if new_count == 0:
         print("\nStatus: SEM ALTERACOES. Historico remoto preservado; nenhum upload.")
         return
