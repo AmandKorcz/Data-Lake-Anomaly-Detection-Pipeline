@@ -185,6 +185,8 @@ def _live_adapters():
         load_alert_history_state,
     )
     from src.loading.ke24_looker_sheet import build_matrix
+    from src.ml.load_ke24_alert_rules import load_protected_alert_rules
+    from src.pipeline.ke24_business_checks_bridge import run_readonly_business_checks
 
     return SimpleNamespace(
         load_processed=load_verified_processed_dataframe,
@@ -194,11 +196,14 @@ def _live_adapters():
         load_history=load_alert_history_state,
         append_alerts=append_new_alerts,
         sheet_matrix=build_matrix,
+        load_rules=load_protected_alert_rules,
+        run_business_checks=run_readonly_business_checks,
     )
 
 
 def execute_readonly_stages(
-    service, privacy_policy, schema, secret_key, *, adapters=None, source_audit=None
+    service, privacy_policy, schema, secret_key, *, adapters=None, source_audit=None,
+    classify=False,
 ):
     adapters = adapters or _live_adapters()
     source_audit = source_audit or audit_drive_sources
@@ -213,12 +218,54 @@ def execute_readonly_stages(
     with _timed_stage("Leitura verificada do processed no Drive"):
         processed = adapters.load_processed(service, privacy_policy, schema)
 
+    # O adapter real executa os checks; os dublês dos testes antigos
+    # continuam independentes e nao precisam fornecer esse método.
+    business_summary = None
+    if hasattr(adapters, 'run_business_checks'):
+        with _timed_stage("Regras oficiais de negocio - somente leitura"):
+            business_summary = adapters.run_business_checks(processed, secret_key)
+        from src.pipeline.ke24_business_checks_bridge import SAFE_BUSINESS_KEYS
+        if not isinstance(business_summary, dict) or (
+            set(business_summary) != set(SAFE_BUSINESS_KEYS) or
+            any(type(value) is not int or value < 0 for value in business_summary.values())
+        ):
+            raise ValueError("Resumo das regras de negocio invalido.")
+
     with _timed_stage("Feature engineering em memoria"):
         dataset, feature_manifest, stats = adapters.build_features(processed, privacy_policy)
 
-    with _timed_stage("Modelo e previa de candidatos (treino temporal em memoria)"):
-        preview = adapters.build_alert_preview(dataset, feature_manifest, privacy_policy)
+    # Regras de negocio sao opt-in, privadas e carregadas apenas uma vez.
+    protected_rules = None
+    if classify:
+        with _timed_stage("Carregamento de regras financeiras privadas"):
+            try:
+                protected_rules = adapters.load_rules()
+            except (RuntimeError, FileNotFoundError, ValueError):
+                raise PreviewBlocked(
+                    "Regras financeiras privadas indisponiveis; "
+                    "verifique o arquivo externo e a politica aprovada."
+                ) from None
 
+    with _timed_stage("Modelo e previa de candidatos (treino temporal em memoria)"):
+        if classify:
+            preview = adapters.build_alert_preview(
+                dataset, feature_manifest, privacy_policy,
+                protected_rules=protected_rules,
+            )
+        else:
+            preview = adapters.build_alert_preview(dataset, feature_manifest, privacy_policy)
+
+    classification_summary = None
+    if classify:
+        from src.pipeline.ke24_business_classification_preview import (
+            summarize_classified_candidates,
+        )
+        with _timed_stage("Resumo agregado de classificacao (somente previa)"):
+            classification_summary = summarize_classified_candidates(
+                preview.get("classified"), preview["candidate_count"]
+            )
+
+    # Nunca persistir niveis experimentais no historico. Mantem PENDING.
     with _timed_stage("Historico de alertas - simulacao, sem persistir"):
         current = adapters.build_pending_outputs(
             preview["candidates"], privacy_policy, datetime.now(timezone.utc)
@@ -242,6 +289,34 @@ def execute_readonly_stages(
         "history_new": newly_detected,
         "sheet_rows": max(0, len(matrix) - 1),
     }
+    if business_summary is not None:
+        result.update(business_summary)
+        LOG.info(
+            "REGRAS OFICIAIS: total=%d, pass=%d, revisao_media=%d, "
+            "revisao_alta=%d, violacao=%d, pendentes=%d",
+            result['business_checks_total'], result['business_checks_pass'],
+            result['business_checks_review_medium'], result['business_checks_review_high'],
+            result['business_checks_violation'], result['business_checks_pending'],
+        )
+        LOG.info(
+            "PENDENTES: historico=%d, base_zero=%d, moeda_nao_configurada=%d; "
+            "receita=%d, materiais=%d",
+            result['business_pending_history'], result['business_pending_zero_baseline'],
+            result['business_pending_company_currency'],
+            result['business_pending_revenue'], result['business_pending_material'],
+        )
+    if classification_summary is not None:
+        result.update(classification_summary)
+        LOG.info(
+            "CLASSIFICACAO (PREVIA): total=%d, pendentes=%d, "
+            "experimentais=%d, prontas_para_revisao=%d, "
+            "prioridade_alta=%d, media=%d, baixa=%d",
+            result["classification_total"], result["classification_pending"],
+            result["classification_experimental"], result["classification_ready"],
+            result["priority_high"], result["priority_medium"],
+            result["priority_low"],
+        )
+        LOG.warning("Classificacao nao valida erro financeiro nem altera o historico.")
     LOG.info(
         "RESUMO: processed=%d, treino=%d, validacao=%d, candidatos=%d, "
         "estaveis=%d, alertas_novos=%d, linhas_previstas_Sheets=%d",
@@ -264,7 +339,7 @@ def _open_read_only_drive():
     return service, policy, schema, secret_key
 
 
-def run_preview(root=ROOT, environ=None):
+def run_preview(root=ROOT, environ=None, *, classify=False):
     env = os.environ if environ is None else environ
     run_id = uuid4().hex[:12]
     LOG.info("KE24 | preview integrado SOMENTE LEITURA | run_id=%s", run_id)
@@ -290,7 +365,12 @@ def run_preview(root=ROOT, environ=None):
         with exclusive_preview(root, run_id):
             try:
                 service, policy, schema, secret_key = _open_read_only_drive()
-                result = execute_readonly_stages(service, policy, schema, secret_key)
+                if classify:
+                    result = execute_readonly_stages(
+                        service, policy, schema, secret_key, classify=True
+                    )
+                else:
+                    result = execute_readonly_stages(service, policy, schema, secret_key)
             except PreviewBlocked as exc:
                 status, failure_kind = "BLOCKED", "PreviewBlocked"
                 LOG.error("BLOQUEADO: %s", exc)
@@ -339,7 +419,15 @@ def run_last_status(root=ROOT):
     for key, value in status.get("metrics", {}).items():
         if key in {"processed_rows", "train_rows", "validation_rows",
                    "candidate_count", "stable_all_seeds", "history_existing",
-                   "history_new", "sheet_rows"} and type(value) is int:
+                   "history_new", "sheet_rows", "classification_total",
+                   "classification_pending", "classification_experimental",
+                   "classification_ready", "priority_high", "priority_medium",
+                   "priority_low", "business_checks_total", "business_checks_pass",
+                   "business_checks_review_medium", "business_checks_review_high",
+                   "business_checks_violation", "business_checks_pending",
+                   "business_pending_history", "business_pending_zero_baseline",
+                   "business_pending_company_currency", "business_pending_revenue",
+                   "business_pending_material"} and type(value) is int:
             LOG.info("  %s: %d", key, value)
     return 0
 
@@ -353,7 +441,13 @@ def main(argv=None):
         help="Consulta Drive e executa ML/historico/planilha em memoria; NAO publica",
     )
     modes.add_argument("--last-run", action="store_true", help="Mostra o ultimo status local, sem acessar o Drive")
+    parser.add_argument(
+        "--classify", action="store_true",
+        help="Apenas com --preview: usa regras privadas externas para classificar em memoria",
+    )
     args = parser.parse_args(argv)
+    if args.classify and not args.preview:
+        parser.error("--classify requer --preview.")
     logging.basicConfig(
         level=logging.INFO, stream=sys.stdout,
         format="%(asctime)s | %(levelname)s | %(message)s",
@@ -362,7 +456,7 @@ def main(argv=None):
         return run_dry_run()
     if args.last_run:
         return run_last_status()
-    return run_preview()
+    return run_preview(classify=True) if args.classify else run_preview()
 
 
 if __name__ == "__main__":
