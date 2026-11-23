@@ -2,36 +2,23 @@ import sys
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-DAGS = ROOT / "airflow" / "dags"
-
+DAGS = Path(__file__).resolve().parents[1] / "airflow" / "dags"
 sys.path.insert(0, str(DAGS))
 
-from ke24_branch_rules import selecionar_destino
+from ke24_branch_rules import PUBLICAR, SOMENTE_PREVIA, selecionar_destino
 
 
 class TestKe24AirflowBranch(unittest.TestCase):
+    def test_publica_somente_com_aprovacao_explicita(self):
+        self.assertEqual(selecionar_destino({"chosen_options": [PUBLICAR]}), "publicar_lote")
 
-    def test_sem_novas_extracoes(self):
-        destino = selecionar_destino(0)
-
-        self.assertEqual(destino, "validacao")
-
-    def test_com_novas_extracoes(self):
-        destino = selecionar_destino(3)
-
-        self.assertEqual(destino, "aguardando_publicacao")
-
-    def test_quantidade_negativa(self):
-        with self.assertRaises(ValueError):
-            selecionar_destino(-1)
-
-    def test_valor_invalido(self):
-        for valor in [None, "0", 0.0, True]:
-            with self.subTest(valor=valor):
-                with self.assertRaises(ValueError):
-                    selecionar_destino(valor)
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_recusa_expiracao_ou_resposta_invalida_seguem_para_previa(self):
+        for resposta in (
+            {"chosen_options": [SOMENTE_PREVIA]},
+            None,
+            {},
+            {"chosen_options": PUBLICAR},
+            {"chosen_options": [PUBLICAR, SOMENTE_PREVIA]},
+        ):
+            with self.subTest(resposta=resposta):
+                self.assertEqual(selecionar_destino(resposta), "somente_previa")

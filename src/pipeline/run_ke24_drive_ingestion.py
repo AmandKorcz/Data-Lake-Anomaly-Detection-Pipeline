@@ -27,6 +27,7 @@ from src.quality.validate_ke24 import (
 )
 
 from src.loading.plan_ke24_incremental import (
+    batch_fingerprint,
     MANIFEST_COLUMNS,
     build_file_manifest,
     plan_incremental_load,
@@ -103,7 +104,10 @@ def main():
         help="Publica somente novos lotes em processed existente (escrita explicita).",
     )
 
+    parser.add_argument("--expected-batch", help="Impressao digital do lote aprovado.")
     args = parser.parse_args()
+    if args.expected_batch is not None and not args.publish_incremental:
+        parser.error("--expected-batch exige --publish-incremental.")
     print("\nKE24 - Integração Google Drive\n")
 
     # Carrega as regras de privacidade e qualidade.
@@ -151,6 +155,8 @@ def main():
     print(f"Arquivos ja processados: {selection['skipped_files']}")
     print(f"Arquivos novos: {selection['new_files']}")
     if not dataframes:
+        if args.expected_batch is not None:
+            raise RuntimeError("Lote aprovado mudou antes da publicacao.")
         print("Nenhum arquivo novo para processar. Nenhum upload realizado.")
         return
 
@@ -195,6 +201,8 @@ def main():
     ) if plan["new_files"] > 0 else pd.DataFrame(
         columns=MANIFEST_COLUMNS
     )
+    if args.expected_batch is not None and batch_fingerprint(new_manifest) != args.expected_batch:
+        raise RuntimeError("Lote aprovado mudou antes da publicacao.")
 
     updated_manifest = pd.concat(
         [

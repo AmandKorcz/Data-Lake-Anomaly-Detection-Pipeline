@@ -1,184 +1,105 @@
-from datetime import datetime
-from ke24_task_runner import executar_modulo, PYTHON_KE24, PROJECT_ROOT
-from ke24_branch_rules import selecionar_destino
-from ke24_notifications import notificar_falha
+from datetime import datetime, timedelta
+import re
 
+from airflow.providers.standard.operators.hitl import HITLOperator
 from airflow.sdk import dag, task
 
-import os
-import re
-import subprocess
+from ke24_branch_rules import PUBLICAR, SOMENTE_PREVIA, selecionar_destino
+from ke24_notifications import notificar_falha
+from ke24_task_runner import executar_modulo
+
+PREVIA = """
+    from tools.ke24_full_flow import execute
+
+    resultado = execute(auto=True)
+    if resultado.completed:
+        print(f"RESUMO KE24: previa concluida. Alertas: {resultado.alerts}.")
+    else:
+        print(f"RESUMO KE24: previa chegou a etapa {resultado.paused_at}.")
+"""
+
 
 @dag(
     dag_id="ke24_anomaly_detection_pipeline",
-    description="Orquestracao do pipeline KE24",
+    description="Valida extracoes KE24 e publica alertas com aprovacao no Airflow",
     start_date=datetime(2026, 11, 1),
     schedule=None,
     catchup=False,
     max_active_runs=1,
-    default_args={
-        "retries": 0,
-        "on_failure_callback": notificar_falha,
-    },
+    default_args={"retries": 0, "on_failure_callback": notificar_falha},
     tags=["KE24", "Data Lake", "Machine Learning"],
 )
-
 def ke24_pipeline():
-
     @task
     def preflight():
-        resultado = subprocess.run(
-            [
-                PYTHON_KE24,
-                "-m",
-                "tools.ke24_new_company_preflight",
-            ],
-            cwd=PROJECT_ROOT,
-            env={
-                **os.environ,
-                "PYTHONPATH": PROJECT_ROOT,
-            },
-            capture_output=True,
-            text=True,
+        output = executar_modulo(
+            modulo="tools.run_ke24_ipv4",
+            argumentos=("tools.ke24_new_company_preflight", "--batch-fingerprint"),
+            descricao="Preflight KE24",
             timeout=600,
-            check=False,
         )
-
-        if resultado.returncode != 0:
-            raise RuntimeError(
-                "Preflight KE24 reprovado. "
-                "Verifique a execucao em ambiente restrito."
-            )
-
-        if "Preflight E2E: APROVADO" not in resultado.stdout:
-            raise RuntimeError(
-                "Confirmacao de aprovacao do preflight ausente."
-            )
-
-        correspondencia = re.search(
-            r"^Extracoes novas:\s*(\d+)\s*$",
-            resultado.stdout,
-            re.MULTILINE,
-        )
-
-        if correspondencia is None:
-            raise RuntimeError(
-                "Quantidade de novas extracoes nao identificada."
-            )
-
-        novas_extracoes = int(correspondencia.group(1))
-
-        print(f"Preflight aprovado | Novas extracoes: {novas_extracoes}")
-
-        return novas_extracoes  
+        patterns = {
+            "extracoes": r"^Extracoes novas: (\d+)$",
+            "registros": r"^Registros novos: (\d+)$",
+            "lote": r"^Impressao digital do lote: ([0-9a-f]{64})$",
+        }
+        campos = {key: re.findall(pattern, output, re.MULTILINE) for key, pattern in patterns.items()}
+        if "Preflight E2E: APROVADO" not in output.splitlines() or any(
+            len(values) != 1 for values in campos.values()
+        ):
+            raise RuntimeError("Preflight KE24 sem confirmacao ou resumo valido.")
+        return {
+            "extracoes": int(campos["extracoes"][0]),
+            "registros": int(campos["registros"][0]),
+            "lote": campos["lote"][0],
+        }
 
     @task.branch
-    def decidir_fluxo(novas_extracoes: int):
-        destino = selecionar_destino(novas_extracoes)
-
-        if destino == "validacao":
-            print("Preflight aprovado. Seguindo pelo fluxo rapido.")
-        else:
-            print(
-                "Novas extracoes detectadas. "
-                "Publicacao manual necessaria."
-            )
-
-        return destino
-    
+    def decidir_fluxo(resposta):
+        return selecionar_destino(resposta)
 
     @task
-    def aguardando_publicacao():
-        raise RuntimeError(
-            "Novas extracoes detectadas. "
-            "Publicacao manual necessaria antes de continuar. "
-            "Nenhuma publicacao foi realizada pelo Airflow."
-        )    
+    def somente_previa():
+        output = executar_modulo(codigo=PREVIA, descricao="Previa KE24", timeout=3600)
+        for line in output.splitlines():
+            if line.startswith("RESUMO KE24: "):
+                print(line)
 
     @task
-    def validacao():
-        codigo = """
-            from src.privacy.privacy_runtime import load_privacy_runtime
-            from src.quality.validate_ke24 import load_schema, load_quality_rules
+    def publicar_lote(preflight_result, resposta):
+        if selecionar_destino(resposta) != "publicar_lote":
+            raise RuntimeError("Publicacao KE24 sem aprovacao.")
 
-            load_privacy_runtime()
-            load_schema()
-            load_quality_rules()
+        codigo = f"""
+            from tools.ke24_full_flow import execute
+
+            result = execute(guided=True, auto=True, approved_batch={preflight_result["lote"]!r})
+            if not result.completed:
+                raise RuntimeError("Publicacao KE24 incompleta.")
+            print(f"RESUMO KE24: alertas na fila: {{result.alerts}}. Publicacoes: {{len(result.writes)}}.")
         """
+        output = executar_modulo(codigo=codigo, descricao="Publicacao KE24 conferida", timeout=7200)
+        for line in output.splitlines():
+            if line.startswith("RESUMO KE24: "):
+                print(line)
 
-        executar_modulo(
-            codigo=codigo,
-            descricao="Validacao de privacidade e qualidade KE24",
-            timeout=120,
-        )
-
-
-    @task
-    def processamento():
-        executar_modulo(
-            modulo="src.pipeline.run_ke24_drive_features",
-            descricao="Feature Engineering KE24",
-            timeout=900,
-        )
-
-
-    @task
-    def alertas():
-        executar_modulo(
-            modulo="src.pipeline.run_ke24_drive_alert_preview",
-            descricao="Previa de candidatos a alertas KE24",
-            timeout=1800,
-        )
-
-
-    @task
-    def dashboard():
-        codigo = """
-    from googleapiclient.discovery import build
-    from src.privacy.privacy_runtime import load_privacy_runtime
-    from src.ingestion.google_drive_client import authenticate
-    from src.loading.ke24_drive_alert_history import load_alert_history_state
-    from src.loading.ke24_looker_sheet import build_matrix
-
-    policy, _, _ = load_privacy_runtime()
-
-    service = build(
-        "drive",
-        "v3",
-        credentials=authenticate(),
-        cache_discovery=False,
+    lote = preflight()
+    aprovacao = HITLOperator(
+        task_id="aprovar_publicacao",
+        subject="KE24: autorizar a publicacao desta execucao?",
+        body=(
+            "Extracoes novas: {{ ti.xcom_pull(task_ids='preflight')['extracoes'] }}. "
+            "Lancamentos novos: {{ ti.xcom_pull(task_ids='preflight')['registros'] }}. "
+            "A autorizacao inclui processed, historico de alertas, fila e contexto no Google Sheets. "
+            "Os alertas novos sao calculados durante a execucao. "
+            "Para evitar gravacoes, escolha Somente previa."
+        ),
+        options=[PUBLICAR, SOMENTE_PREVIA],
+        defaults=[SOMENTE_PREVIA],
+        response_timeout=timedelta(hours=1),
     )
+    lote >> aprovacao
+    decidir_fluxo(aprovacao.output) >> [somente_previa(), publicar_lote(lote, aprovacao.output)]
 
-    state = load_alert_history_state(service, policy)
-
-    if not state.snapshots:
-        raise RuntimeError("Historico protegido ainda nao foi publicado.")
-
-    matrix = build_matrix(state.history, policy)
-
-    if len(matrix) != len(state.history) + 1:
-        raise RuntimeError("Quantidade de registros inconsistente.")
-    """
-
-        executar_modulo(
-            codigo=codigo,
-            descricao="Validacao da fonte do dashboard KE24",
-            timeout=180,
-        )
-
-    resultado_preflight = preflight()
-    decisao = decidir_fluxo(resultado_preflight)
-
-    tarefa_validacao = validacao()
-    tarefa_aguardando = aguardando_publicacao()
-
-    decisao >> [tarefa_validacao, tarefa_aguardando]
-
-    (
-        tarefa_validacao
-        >> processamento()
-        >> alertas()
-        >> dashboard()
-    )
 
 ke24_pipeline()

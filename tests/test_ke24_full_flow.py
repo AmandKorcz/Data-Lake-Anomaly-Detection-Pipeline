@@ -6,8 +6,8 @@ from tools.ke24_full_flow import (
     FlowStopped, Result, approve, execute, number,
 )
 
-PRE_NEW = 'Extracoes novas: 2\nPreflight E2E: APROVADO\n'
-PRE_ZERO = 'Extracoes novas: 0\nPreflight E2E: APROVADO\n'
+PRE_NEW = 'Extracoes novas: 2\nRegistros novos: 40\nPreflight E2E: APROVADO\n'
+PRE_ZERO = 'Extracoes novas: 0\nRegistros novos: 0\nPreflight E2E: APROVADO\n'
 ING_NEW = 'Arquivos novos: 2\nArquivos novos: 2\nStatus: APROVADO\n'
 ING_ZERO = 'Arquivos novos: 0\nNenhum arquivo novo para processar. Nenhum upload realizado.\n'
 ING_PUB = 'Lote incremental publicado e validado.\nStatus: APROVADO\n'
@@ -239,3 +239,30 @@ def test_capacity_checked_before_alert_history_publication():
     with pytest.raises(FlowStopped, match='capacidade'):
         execute(guided=True, runner=run, ask=lambda _: 'PUBLICAR')
     assert len(calls) == 4
+
+
+def test_airflow_approval_publishes_the_validated_batch_without_prompting():
+    batch = "a" * 64
+    steps = full()
+    steps[0] = (PRE, ("--batch-fingerprint",),
+                PRE_NEW + f"Impressao digital do lote: {batch}\n")
+    steps[2] = (ING, ("--publish-incremental", "--expected-batch", batch), ING_PUB)
+    del steps[4]  # A etapa de alertas já executa o modelo.
+    run, calls = runner_for(*steps)
+
+    result = execute(guided=True, auto=True, approved_batch=batch, runner=run,
+                     ask=lambda _: pytest.fail("Airflow não deve pedir entrada no terminal"))
+
+    assert result.completed
+    assert result.writes == ("processed", "alert_history", "review_queue", "review_context")
+    assert len(calls) == len(steps)
+
+
+def test_airflow_approval_rejects_a_changed_batch_before_writes():
+    preview = PRE_NEW + f"Impressao digital do lote: {'b' * 64}\n"
+    run, calls = runner_for((PRE, ("--batch-fingerprint",), preview))
+
+    with pytest.raises(FlowStopped, match="mudou desde a aprovacao"):
+        execute(guided=True, auto=True, approved_batch="a" * 64, runner=run)
+
+    assert calls == [(PRE, ("--batch-fingerprint",))]

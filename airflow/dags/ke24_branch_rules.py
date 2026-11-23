@@ -1,9 +1,8 @@
-def selecionar_destino(novas_extracoes: int) -> str:
+PUBLICAR = "Publicar lote"
+SOMENTE_PREVIA = "Somente previa"
 
-    if type(novas_extracoes) is not int or novas_extracoes < 0:
-        raise ValueError("Quantidade de novas extracoes invalida.")
 
-    if novas_extracoes == 0:
-        return "validacao"
-
-    return "aguardando_publicacao"
+def selecionar_destino(resposta):
+    if isinstance(resposta, dict) and resposta.get("chosen_options") == [PUBLICAR]:
+        return "publicar_lote"
+    return "somente_previa"

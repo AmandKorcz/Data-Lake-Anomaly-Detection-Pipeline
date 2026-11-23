@@ -5,7 +5,7 @@ import re
 
 import pandas as pd
 
-from src.loading.plan_ke24_incremental import MANIFEST_COLUMNS
+from src.loading.plan_ke24_incremental import MANIFEST_COLUMNS, batch_fingerprint
 
 _TOKEN = re.compile(r"TKN_[0-9a-f]{32}\Z")
 _CURRENCY = re.compile(r"[A-Z]{3}\Z")
@@ -250,7 +250,7 @@ def _read_only_preview():
         incoming = pd.DataFrame(columns=MANIFEST_COLUMNS)
     aliases = load_private_company_aliases(key)
     result = plan_new_company_preflight(committed, incoming, aliases)
-    return result, aliases
+    return result, aliases, batch_fingerprint(incoming)
 
 
 def main(argv=None) -> int:
@@ -258,10 +258,13 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Valida empresas novas no raw sem gravar nada no Drive/Sheets."
     )
-    parser.parse_args(argv)
+    parser.add_argument("--batch-fingerprint", action="store_true")
+    args = parser.parse_args(argv)
     try:
-        report, aliases = _read_only_preview()
+        report, aliases, fingerprint = _read_only_preview()
         print(format_preflight(report, aliases))
+        if args.batch_fingerprint and report.ready_for_e2e:
+            print(f"Impressao digital do lote: {fingerprint}")
         return 0 if report.ready_for_e2e else 2
     except Exception as exc:
         print(f"Preflight REPROVADO ({type(exc).__name__}). "

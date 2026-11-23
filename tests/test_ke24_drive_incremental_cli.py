@@ -44,6 +44,15 @@ def test_incremental_flag_no_new_files_skips_write_auth(monkeypatch, capsys):
     assert "Nenhum upload realizado" in output
 
 
+def test_approved_batch_that_is_no_longer_pending_blocks_publication(monkeypatch):
+    _no_write_setup(monkeypatch)
+    monkeypatch.setattr(sys, "argv", [
+        "run_ke24_drive_ingestion", "--publish-incremental", "--expected-batch", "a" * 64,
+    ])
+    with pytest.raises(RuntimeError, match="Lote aprovado mudou"):
+        runner.main()
+
+
 def test_incremental_flag_rejects_first_publication(monkeypatch):
     monkeypatch.setattr(runner, "load_privacy_runtime", lambda: ({}, {}, KEY))
     monkeypatch.setattr(runner, "load_schema", lambda: {"columns": ["period"]})

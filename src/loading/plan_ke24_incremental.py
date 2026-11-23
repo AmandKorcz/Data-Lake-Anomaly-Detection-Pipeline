@@ -1,3 +1,5 @@
+from hashlib import sha256
+
 import pandas as pd
 
 FILE_ID = "_source_file_sha256"
@@ -21,6 +23,11 @@ MANIFEST_COLUMNS = [
     *BUSINESS_KEY,
     "record_count",
 ]
+
+
+def batch_fingerprint(manifest):
+    file_ids = sorted(manifest[FILE_ID].unique())
+    return sha256("\n".join(file_ids).encode("ascii")).hexdigest()
 
 def _check_columns(df, required):
     if df.columns.duplicated().any():

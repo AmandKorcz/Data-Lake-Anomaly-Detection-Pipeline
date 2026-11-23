@@ -53,7 +53,7 @@ services:
       - ../config:/opt/ke24/config:ro
       - "${KE24_HMAC_HOST_FILE}:/run/secrets/ke24_hmac_key:ro"
       - ke24-airflow-auth:/opt/airflow/auth
-      - "${KE24_ALIASES_HOST_FILE}:/home/airflow/AppData/Local/KE24/review/company_aliases.json:ro"
+      - "${KE24_REVIEW_HOST_DIR:?Configure KE24_REVIEW_HOST_DIR}:/home/airflow/AppData/Local/KE24/review"
 
 volumes:
   postgres_data:

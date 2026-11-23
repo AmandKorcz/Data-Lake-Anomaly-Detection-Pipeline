@@ -1,27 +1,27 @@
 import sys
-import unittest
+from datetime import timedelta
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "airflow" / "dags"))
-
-from ke24_branch_rules import selecionar_destino
+import pytest
 
 
-class TestKe24AirflowStructure(unittest.TestCase):
+def test_publicacao_depende_da_resposta_humana():
+    pytest.importorskip("airflow.sdk")
+    dags = Path(__file__).resolve().parents[1] / "airflow" / "dags"
+    sys.path.insert(0, str(dags))
 
-    def test_novas_extracoes_selecionam_bloqueio(self):
-        self.assertEqual(
-            selecionar_destino(1),
-            "aguardando_publicacao",
-        )
+    from ke24_branch_rules import PUBLICAR, SOMENTE_PREVIA
+    from ke24_pipeline import ke24_pipeline
 
-    def test_fluxo_sem_novos_arquivos(self):
-        self.assertEqual(
-            selecionar_destino(0),
-            "validacao",
-        )
-
-
-if __name__ == "__main__":
-    unittest.main()
+    dag = ke24_pipeline()
+    approval = dag.get_task("aprovar_publicacao")
+    assert approval.options == [PUBLICAR, SOMENTE_PREVIA]
+    assert approval.defaults == [SOMENTE_PREVIA]
+    assert approval.response_timeout == timedelta(hours=1)
+    assert approval.upstream_task_ids == {"preflight"}
+    assert dag.get_task("decidir_fluxo").downstream_task_ids == {
+        "publicar_lote", "somente_previa"
+    }
+    assert {"preflight", "decidir_fluxo", "aprovar_publicacao"} <= (
+        dag.get_task("publicar_lote").upstream_task_ids
+    )

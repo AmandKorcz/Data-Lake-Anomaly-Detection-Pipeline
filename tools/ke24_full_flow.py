@@ -139,7 +139,12 @@ def execute(
     verbose: bool = False,
     fast: bool = False,
     auto: bool = False,
+    approved_batch: str | None = None,
 ) -> Summary:
+    if approved_batch is not None and (
+        not guided or re.fullmatch(r"[0-9a-f]{64}", approved_batch) is None
+    ):
+        raise ValueError("Lote aprovado invalido.")
     writes: list[str] = []
     alerts_total: int | None = None
     start = time.monotonic()
@@ -179,8 +184,14 @@ def execute(
         print(SEPARATOR)
         return Summary(False, phase, tuple(writes), alerts_total)
 
+    def can_publish(stage: str) -> bool:
+        return guided and (approved_batch is not None or approve(stage, ask))
+
     # 1. Preflight segue SEMPRE completo, inclusive em --fast.
-    pre = step("1/7 Validacao raw", PRE, requires="Preflight E2E: APROVADO")
+    preflight_args = ("--batch-fingerprint",) if approved_batch is not None else ()
+    pre = step("1/7 Validacao raw", PRE, *preflight_args, requires="Preflight E2E: APROVADO")
+    if approved_batch is not None and f"Impressao digital do lote: {approved_batch}" not in pre.splitlines():
+        raise FlowStopped("O lote mudou desde a aprovacao. Inicie uma nova execucao.")
     incoming = number(pre, "Extracoes novas")
     new_rows = number(pre, "Registros novos")
     print(f"   Novas extracoes: {quantity(incoming)} | Novos registros: {quantity(new_rows)}")
@@ -209,10 +220,11 @@ def execute(
         if incoming:
             if "Status: APROVADO" not in ing:
                 raise FlowStopped("Previa da ingestao sem aprovacao.")
-            if not guided or not approve("incluir XLSX novos no processed", ask):
+            if not can_publish("incluir XLSX novos no processed"):
                 return paused("processed")
+            batch_args = ("--expected-batch", approved_batch) if approved_batch is not None else ()
             written = step(
-                "2/7 Publicando processed", ING, "--publish-incremental",
+                "2/7 Publicando processed", ING, "--publish-incremental", *batch_args,
                 requires="Lote incremental publicado e validado.",
             )
             if "Status: APROVADO" not in written:
@@ -225,7 +237,7 @@ def execute(
             print("   Nenhum arquivo novo | Processed mantido.")
 
     # 3. O algoritmo ja e executado dentro da etapa 4 (build_alert_preview_in_memory).
-    if fast:
+    if fast or approved_batch is not None:
         stage_header("3/7 Machine Learning")
         print("   Integrado a etapa de alertas | Sem execucao duplicada.")
     else:
@@ -249,7 +261,7 @@ def execute(
             f"{MAX_REVIEW_ALERTS} da fila/contexto."
         )
     if new_alerts:
-        if not guided or not approve("atualizar historico protegido de alertas", ask):
+        if not can_publish("atualizar historico protegido de alertas"):
             return paused("historico de alertas")
         confirmed = f"Status: PUBLICACAO VERIFICADA ({alerts_total} alertas no historico)."
         step("4/7 Publicando historico protegido", ALERT, "--publish", requires=confirmed)
@@ -271,7 +283,7 @@ def execute(
         raise FlowStopped("Historico e fila discordam em quantidade.")
     # Pedidos humanos nao autenticados sao informados apenas no resumo.
     if que_new:
-        if not guided or not approve("adicionar novas linhas na fila de revisao", ask):
+        if not can_publish("adicionar novas linhas na fila de revisao"):
             return paused("fila de revisao")
         step(
             "5/7 Publicando fila", QUEUE, "--publish", "--confirm-publish",
@@ -295,7 +307,7 @@ def execute(
     if number(ctx, "queue_alerts") != alerts_total or ctx_old + ctx_new != alerts_total:
         raise FlowStopped("Contexto e fila divergem.")
     if ctx_new:
-        if not guided or not approve("adicionar novas linhas no contexto", ask):
+        if not can_publish("adicionar novas linhas no contexto"):
             return paused("contexto")
         step(
             "6/7 Publicando contexto", CONTEXT, "--publish", "--confirm-publish",
