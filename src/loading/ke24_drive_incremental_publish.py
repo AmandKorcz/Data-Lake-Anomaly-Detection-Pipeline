@@ -25,7 +25,15 @@ from src.loading.ke24_drive_manifest import (
 from src.loading.ke24_drive_publish import _upload_and_verify
 from src.loading.plan_ke24_incremental import BUSINESS_KEY, FILE_ID, MANIFEST_COLUMNS
 
-LOCK_PATH = Path.home() / "AppData" / "Local" / "KE24" / "locks" / "incremental_processed.lock"
+LOCK_PATH = (
+    Path.home()
+    / "AppData"
+    / "Local"
+    / "KE24"
+    / "oauth"
+    / "locks"
+    / "incremental_processed.lock"
+)
 
 
 @dataclass(frozen=True)

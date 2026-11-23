@@ -4,6 +4,7 @@ import signal
 import subprocess
 from time import perf_counter
 
+import re
 
 PYTHON_KE24 = "/opt/ke24-venv/bin/python"
 PROJECT_ROOT = "/opt/ke24"
@@ -37,7 +38,7 @@ def executar_modulo(modulo=None, descricao="", timeout=1200, codigo=None, argume
             start_new_session=True,
         ) as processo:
             try:
-                stdout, _ = processo.communicate(timeout=timeout)
+                stdout, stderr = processo.communicate(timeout=timeout)
             except BaseException:
                 # O fluxo serial abre subprocessos que tambem devem parar.
                 try:
@@ -52,9 +53,26 @@ def executar_modulo(modulo=None, descricao="", timeout=1200, codigo=None, argume
         print(f"Codigo de retorno: {processo.returncode}")
 
         if processo.returncode != 0:
+            etapas = re.findall(
+                r"(?m)^\[(\d{2}/\d{2})\]\s+([A-Z0-9 /()-]+)$",
+                stdout or "",
+            )
+
+            if etapas:
+                numero, nome = etapas[-1]
+                print(f"Ultima etapa interna: {numero} {nome}")
+            else:
+                print("Ultima etapa interna: nao identificada")
+
+            for nome, conteudo in (("stdout", stdout), ("stderr", stderr)):
+                linhas = (conteudo or "").splitlines()
+                if linhas:
+                    print(f"Diagnostico interno {nome} (ultimas 80 linhas):")
+                    print("\n".join(linhas[-80:]))
+
             raise RuntimeError(
                 f"Falha na etapa {descricao}. "
-                "Consulte a execucao local para diagnostico."
+                "Consulte o diagnostico da etapa interna."
             )
 
         print(f"[OK] {descricao}")

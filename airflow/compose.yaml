@@ -40,6 +40,7 @@ services:
       KE24_DRIVE_RAW_FOLDER_ID: "${KE24_DRIVE_RAW_FOLDER_ID}"
       KE24_HMAC_KEY_FILE: /run/secrets/ke24_hmac_key
       AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/passwords.json
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google-adc.json
 
     ports:
       - "127.0.0.1:8080:8080"
@@ -54,6 +55,8 @@ services:
       - "${KE24_HMAC_HOST_FILE}:/run/secrets/ke24_hmac_key:ro"
       - ke24-airflow-auth:/opt/airflow/auth
       - "${KE24_REVIEW_HOST_DIR:?Configure KE24_REVIEW_HOST_DIR}:/home/airflow/AppData/Local/KE24/review"
+      - "${GOOGLE_APPLICATION_CREDENTIALS_HOST_FILE:?Configure GOOGLE_APPLICATION_CREDENTIALS_HOST_FILE}:/run/secrets/google-adc.json:ro"
+      - ../sql:/opt/ke24/sql:ro
 
 volumes:
   postgres_data:

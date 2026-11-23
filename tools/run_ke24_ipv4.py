@@ -15,6 +15,7 @@ ALLOWED_MODULES = (
     "src.review.run_ke24_review_sheet",
     "tools.ke24_review_context_tab",
     "tools.diagnose_ke24_recurrence",
+    "src.pipeline.run_ke24_bigquery_processed",
 )
 
 

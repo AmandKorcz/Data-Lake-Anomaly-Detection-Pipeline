@@ -73,7 +73,7 @@ def ke24_pipeline():
         codigo = f"""
             from tools.ke24_full_flow import execute
 
-            result = execute(guided=True, auto=True, approved_batch={preflight_result["lote"]!r})
+            result = execute(guided=True, auto=True, verbose=True, approved_batch={preflight_result["lote"]!r})
             if not result.completed:
                 raise RuntimeError("Publicacao KE24 incompleta.")
             print(f"RESUMO KE24: alertas na fila: {{result.alerts}}. Publicacoes: {{len(result.writes)}}.")
@@ -90,7 +90,9 @@ def ke24_pipeline():
         body=(
             "Extracoes novas: {{ ti.xcom_pull(task_ids='preflight')['extracoes'] }}. "
             "Lancamentos novos: {{ ti.xcom_pull(task_ids='preflight')['registros'] }}. "
-            "A autorizacao inclui processed, historico de alertas, fila e contexto no Google Sheets. "
+            "A autorizacao inclui processed, historico de alertas, fila e contexto no Google Sheets, "
+            "e a substituicao do snapshot completo no BigQuery "
+            "(datalake-pipeline.profitability_data.ke24_processed). "
             "Os alertas novos sao calculados durante a execucao. "
             "Para evitar gravacoes, escolha Somente previa."
         ),

@@ -18,6 +18,7 @@ ALERT = "src.pipeline.run_ke24_drive_alert_persistence"
 QUEUE = "src.review.run_ke24_review_sheet"
 CONTEXT = "tools.ke24_review_context_tab"
 MAX_REVIEW_ALERTS = 5000
+BIGQUERY = "src.pipeline.run_ke24_bigquery_processed"
 
 SEPARATOR = "-" * 68
 
@@ -323,7 +324,32 @@ def execute(
     else:
         print("   Contexto sincronizado.")
 
-    stage_header("7/7 Resumo da execucao")
+        bq_preview = step(
+        "7/8 Previa da tabela de rentabilidade BigQuery",
+        BIGQUERY,
+        requires="Prévia concluída. Use --publish para publicar a tabela.",
+    )
+
+    if guided:
+        if not can_publish(
+            "substituir o snapshot de rentabilidade no BigQuery "
+            "(datalake-pipeline.profitability_data.ke24_processed)"
+        ):
+            return paused("BigQuery rentabilidade")
+
+        step(
+            "7/8 Publicando rentabilidade no BigQuery",
+            BIGQUERY,
+            "--publish",
+            "--sync-profitability",
+            requires=(
+                "Publicação concluída. "
+                "As contagens no BigQuery conferem com o Drive."
+            ),
+        )
+        writes.append("bigquery_processed")
+
+    stage_header("8/8 Resumo da execucao")
     print("   Status: CONCLUIDO")
     print(f"   Tipo de fluxo: {'RAPIDO' if fast else 'COMPLETO'}")
     print(f"   Novas extracoes: {quantity(incoming)} | Novos alertas: {quantity(new_alerts)}")

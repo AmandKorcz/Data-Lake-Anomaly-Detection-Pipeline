@@ -27,7 +27,7 @@ TOKEN_FILE = OAUTH_DIR / "drive-token.json"
 WRITE_TOKEN_FILE = OAUTH_DIR / "drive-write-token.json"
 
 WRITE_SCOPES = [
-    "https://www.googleapis.com/auth/drive.file"
+    "https://www.googleapis.com/auth/drive"
 ]
 
 SCOPES = [
@@ -127,11 +127,7 @@ def list_raw_xlsx_files(service):
 
     return sorted(files, key=lambda file: file["name"])
 
-
-
 def authenticate_write():
-    #Autentica o Google Drive com permissão de escrita
-
     credentials = None
 
     if WRITE_TOKEN_FILE.exists():
@@ -139,10 +135,9 @@ def authenticate_write():
             str(WRITE_TOKEN_FILE)
         )
 
+        # Se o token antigo não tiver o novo escopo, solicitar autorização novamente.
         if not credentials.has_scopes(WRITE_SCOPES):
-            raise ValueError(
-                "O token de escrita não possui o escopo esperado."
-            )
+            credentials = None
 
     if (
         credentials
@@ -163,9 +158,10 @@ def authenticate_write():
             access_type="offline",
         )
 
+    # Se o consentimento não conceder o escopo solicitado, parar sem salvar o token.
     if not credentials.has_scopes(WRITE_SCOPES):
         raise ValueError(
-            "A autorização de escrita não foi concedida."
+            "A autorização de escrita não concedeu acesso ao Drive."
         )
 
     WRITE_TOKEN_FILE.parent.mkdir(
