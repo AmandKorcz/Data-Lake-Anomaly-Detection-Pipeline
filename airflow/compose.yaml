@@ -7,7 +7,7 @@ services:
 
     environment:
       POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow_local_dev
+      POSTGRES_PASSWORD: "${AIRFLOW_POSTGRES_PASSWORD:?Configure AIRFLOW_POSTGRES_PASSWORD}"
       POSTGRES_DB: airflow
 
     volumes:
@@ -36,7 +36,7 @@ services:
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "False"
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow_local_dev@postgres:5432/airflow
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:${AIRFLOW_POSTGRES_PASSWORD:?Configure AIRFLOW_POSTGRES_PASSWORD}@postgres:5432/airflow"
       KE24_DRIVE_RAW_FOLDER_ID: "${KE24_DRIVE_RAW_FOLDER_ID}"
       KE24_HMAC_KEY_FILE: /run/secrets/ke24_hmac_key
       AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/passwords.json
@@ -49,7 +49,7 @@ services:
       - ../src:/opt/ke24/src:ro
       - ../tools:/opt/ke24/tools:ro
       - airflow_logs:/opt/airflow/logs
-      - "${LOCALAPPDATA}/KE24/airflow-oauth:/home/airflow/AppData/Local/KE24/oauth"
+      - "${KE24_OAUTH_HOST_DIR:?Configure KE24_OAUTH_HOST_DIR}:/home/airflow/AppData/Local/KE24/oauth"
       - ../config:/opt/ke24/config:ro
       - "${KE24_HMAC_HOST_FILE}:/run/secrets/ke24_hmac_key:ro"
       - ke24-airflow-auth:/opt/airflow/auth

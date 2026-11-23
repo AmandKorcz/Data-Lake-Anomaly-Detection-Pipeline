@@ -1,5 +1,7 @@
 from datetime import datetime
 from ke24_task_runner import executar_modulo, PYTHON_KE24, PROJECT_ROOT
+from ke24_branch_rules import selecionar_destino
+from ke24_notifications import notificar_falha
 
 from airflow.sdk import dag, task
 
@@ -14,8 +16,13 @@ import subprocess
     schedule=None,
     catchup=False,
     max_active_runs=1,
+    default_args={
+        "retries": 0,
+        "on_failure_callback": notificar_falha,
+    },
     tags=["KE24", "Data Lake", "Machine Learning"],
 )
+
 def ke24_pipeline():
 
     @task
@@ -67,15 +74,18 @@ def ke24_pipeline():
 
     @task.branch
     def decidir_fluxo(novas_extracoes: int):
-        if novas_extracoes == 0:
-            print("Nenhuma extracao nova. Continuando com dados existentes.")
-            return "validacao"
+        destino = selecionar_destino(novas_extracoes)
 
-        print(
-            f"{novas_extracoes} nova(s) extracao(oes) encontrada(s). "
-            "Publicacao manual necessaria antes de continuar."
-        )
-        return "aguardando_publicacao"
+        if destino == "validacao":
+            print("Preflight aprovado. Seguindo pelo fluxo rapido.")
+        else:
+            print(
+                "Novas extracoes detectadas. "
+                "Publicacao manual necessaria."
+            )
+
+        return destino
+    
 
     @task
     def aguardando_publicacao():
@@ -83,7 +93,7 @@ def ke24_pipeline():
             "Novas extracoes detectadas. "
             "Publicacao manual necessaria antes de continuar. "
             "Nenhuma publicacao foi realizada pelo Airflow."
-        )
+        )    
 
     @task
     def validacao():
