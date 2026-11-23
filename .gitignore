@@ -50,6 +50,9 @@ drive-write-token.json
 token.json
 client_secret*.json/config/ke24.keys.env
 
+# Configuracoes locais do Airflow
+airflow/.env
+
 /config/ke24.keys.env*.keys.env
 *.local.env
 *.private.env

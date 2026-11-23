@@ -128,16 +128,19 @@ def check_existing_sheet(actual, desired):
     return len(seen)
 
 
-def create_empty_sheet(sheets_service):
+def create_empty_sheet(
+    sheets_service, *, workbook_title=WORKBOOK_TITLE, sheet_title=SHEET_TITLE,
+    column_count=len(EXPORT_COLUMNS),
+):
     result = sheets_service.spreadsheets().create(
         body={
-            "properties": {"title": WORKBOOK_TITLE},
+            "properties": {"title": workbook_title},
             "sheets": [{
                 "properties": {
-                    "title": SHEET_TITLE,
+                    "title": sheet_title,
                     "gridProperties": {
                         "rowCount": 1000,
-                        "columnCount": len(EXPORT_COLUMNS),
+                        "columnCount": column_count,
                         "frozenRowCount": 1,
                     },
                 },
@@ -150,7 +153,11 @@ def create_empty_sheet(sheets_service):
     return result
 
 
-def inspect_sheet(sheets_service, drive_service, spreadsheet_id):
+def inspect_sheet(
+    sheets_service, drive_service, spreadsheet_id, *,
+    sheet_title=SHEET_TITLE, column_count=len(EXPORT_COLUMNS),
+    legacy_column_count=None,
+):
     target = drive_service.files().get(
         fileId=spreadsheet_id,
         fields="id,mimeType,shared,trashed,capabilities(canEdit)",
@@ -166,17 +173,25 @@ def inspect_sheet(sheets_service, drive_service, spreadsheet_id):
         fields="spreadsheetId,sheets(properties(sheetId,title,gridProperties))",
     ).execute()
     sheets = metadata.get("sheets", [])
-    if len(sheets) != 1 or sheets[0].get("properties", {}).get("title") != SHEET_TITLE:
+    if len(sheets) != 1 or sheets[0].get("properties", {}).get("title") != sheet_title:
         raise RuntimeError("Destino nao corresponde a uma planilha KE24 dedicada.")
     sheet = sheets[0]["properties"]
     grid = sheet.get("gridProperties", {})
-    if grid.get("columnCount") != len(EXPORT_COLUMNS) or not isinstance(sheet.get("sheetId"), int):
+    actual_column_count = grid.get("columnCount")
+    if (
+        not isinstance(actual_column_count, int)
+        or actual_column_count not in (column_count, legacy_column_count)
+        or not isinstance(sheet.get("sheetId"), int)
+    ):
         raise RuntimeError("Formato da aba nao corresponde ao contrato KE24.")
     return sheet
 
 
-def read_sheet_matrix(sheets_service, spreadsheet_id):
-    value_range = f"'{SHEET_TITLE}'!A1:{_letter(len(EXPORT_COLUMNS))}"
+def read_sheet_matrix(
+    sheets_service, spreadsheet_id, *, sheet_title=SHEET_TITLE,
+    column_count=len(EXPORT_COLUMNS),
+):
+    value_range = f"'{sheet_title}'!A1:{_letter(column_count)}"
     return sheets_service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
         range=value_range,

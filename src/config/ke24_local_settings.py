@@ -7,6 +7,7 @@ from dotenv import dotenv_values
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LOCAL_CONFIG = PROJECT_ROOT / "config" / ".env"
+PROFITABILITY_SHEET_KEY = "KE24_PROFITABILITY_SPREADSHEET_ID"
 FOLDER_KEYS = (
     "KE24_DRIVE_RAW_FOLDER_ID",
     "KE24_DRIVE_PROCESSED_FOLDER_ID",
@@ -15,6 +16,7 @@ FOLDER_KEYS = (
 OPTIONAL_KEYS = (
     "KE24_LOOKER_SPREADSHEET_ID",
     "KE24_REVIEW_SPREADSHEET_ID",
+    PROFITABILITY_SHEET_KEY,
 )
 SUPPORTED_KEYS = (*FOLDER_KEYS, *OPTIONAL_KEYS)
 ID_PATTERN = re.compile(r"[A-Za-z0-9_-]+\Z")
@@ -33,10 +35,9 @@ def _check_distinct_folders(values: dict[str, str]) -> None:
 
 
 def _check_distinct_sheets(values: dict[str, str]) -> None:
-    technical = values.get("KE24_LOOKER_SPREADSHEET_ID")
-    review = values.get("KE24_REVIEW_SPREADSHEET_ID")
-    if technical and review and technical == review:
-        raise ValueError("A planilha tecnica e a fila de revisao devem ter IDs diferentes.")
+    present = [values[name] for name in OPTIONAL_KEYS if values.get(name)]
+    if len(set(present)) != len(present):
+        raise ValueError("As planilhas KE24 devem ter IDs diferentes.")
 
 
 def load_ke24_local_settings(path: Path = LOCAL_CONFIG) -> tuple[str, ...]:
