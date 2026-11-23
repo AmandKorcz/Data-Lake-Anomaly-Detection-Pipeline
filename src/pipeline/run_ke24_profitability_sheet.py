@@ -1,5 +1,6 @@
 import argparse
 from datetime import date
+from itertools import zip_longest
 import math
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ from src.ingestion.google_drive_client import authenticate_write
 from src.loading.ke24_looker_sheet import create_empty_sheet, inspect_sheet, read_sheet_matrix
 from src.loading.load_ke24_bigquery import BQ_LOCATION, GCP_PROJECT
 from src.privacy.privacy_runtime import load_privacy_runtime
+from src.privacy.validate_protected_dataset import TOKEN_PATTERN
 from src.review.ke24_review_company_aliases import load_private_company_aliases
 
 
@@ -29,7 +31,9 @@ METRICS = (
     "industrial_op", "other_operating_income_expense",
     "other_financial_income_expense", "income_taxes",
 )
-HEADERS = [*DIMENSIONS[:2], "period_date", *DIMENSIONS[2:], *METRICS]
+LEGACY_HEADERS = [*DIMENSIONS[:2], "period_date", *DIMENSIONS[2:], *METRICS]
+DETAIL_DIMENSIONS = ("period", "calendar_year", "plant", "profit_center", "copa_event_type")
+HEADERS = [*LEGACY_HEADERS, *DETAIL_DIMENSIONS]
 EXCEL_EPOCH = date(1899, 12, 30)
 SHEET_OPTIONS = {"sheet_title": SHEET_TITLE, "column_count": len(HEADERS)}
 
@@ -51,11 +55,11 @@ def build_profitability_matrix(rows, company_aliases):
     matrix = [HEADERS]
     seen = set()
     for row in rows:
-        key = tuple(row[column] for column in DIMENSIONS)
-        if any(not isinstance(value, str) or not value.strip() for value in key):
+        dimensions = tuple(row[column] for column in DIMENSIONS)
+        if any(not isinstance(value, str) or not value.strip() for value in dimensions):
             raise ValueError("Dimensão de rentabilidade ausente ou inválida.")
-        company, period, currency_type, currency = key
-        if not re.fullmatch(r"TKN_[0-9a-f]{32}", company):
+        company, period_key, currency_type, currency = dimensions
+        if not re.fullmatch(TOKEN_PATTERN, company):
             raise ValueError("Empresa sem identificador protegido. Publicação bloqueada.")
         company_label = company_aliases.get(company)
         if company_label is None:
@@ -63,19 +67,34 @@ def build_profitability_matrix(rows, company_aliases):
                 "Empresa sem alias cadastrado em company_aliases.json. "
                 "Complete o mapeamento privado antes de publicar."
             )
-        if not re.fullmatch(r"[0-9]{4}-[0-9]{2}", period):
+        if not re.fullmatch(r"[0-9]{4}-[0-9]{2}", period_key):
             raise ValueError("Competência inválida para publicação.")
+        period_date = date.fromisoformat(f"{period_key}-01")
+        detail = tuple(row[column] for column in DETAIL_DIMENSIONS)
+        period, calendar_year, plant, profit_center, event_type = detail
+        for value, expected in ((period, period_date.month), (calendar_year, period_date.year)):
+            if value is not None and (type(value) is not int or value != expected):
+                raise ValueError("Período ou ano calendário divergente da competência.")
+        for value in (plant, profit_center):
+            if value is not None and (
+                not isinstance(value, str) or not re.fullmatch(TOKEN_PATTERN, value)
+            ):
+                raise ValueError("Planta ou centro de lucro sem identificador protegido.")
+        if event_type is not None and not isinstance(event_type, str):
+            raise ValueError("Tipo de evento CO-PA inválido.")
+
+        key = (*dimensions, *detail)
         if key in seen:
-            raise ValueError("Empresa, competência e moeda duplicadas no resultado.")
+            raise ValueError("Dimensões de rentabilidade duplicadas no resultado.")
         seen.add(key)
 
-        serial = (date.fromisoformat(f"{period}-01") - EXCEL_EPOCH).days
+        serial = (period_date - EXCEL_EPOCH).days
         values = [float(row[column]) for column in METRICS]
         if not all(math.isfinite(value) for value in values):
             raise ValueError("Métrica não finita no resultado do BigQuery.")
         if values[0] <= 0 or not values[0].is_integer():
             raise ValueError("Contagem de lançamentos inválida.")
-        matrix.append([company_label, period, serial, currency_type, currency, *values])
+        matrix.append([company_label, period_key, serial, currency_type, currency, *values, *detail])
 
     if len(matrix) == 1:
         raise ValueError("Consulta sem resultados. A planilha foi preservada.")
@@ -86,10 +105,14 @@ def _same_matrix(actual, desired):
     if len(actual) != len(desired):
         return False
     for current, target in zip(actual, desired):
-        if len(current) != len(target):
+        if len(current) > len(target):
             return False
-        for cell, expected in zip(current, target):
-            if isinstance(expected, str):
+        # O Sheets omite células vazias no fim de cada linha.
+        for cell, expected in zip_longest(current, target):
+            if expected is None:
+                if cell not in (None, ""):
+                    return False
+            elif isinstance(expected, str):
                 if cell != expected:
                     return False
             elif type(cell) not in (int, float) or not math.isclose(
@@ -100,9 +123,16 @@ def _same_matrix(actual, desired):
 
 
 def publish_profitability_matrix(sheets, drive, spreadsheet_id, desired):
-    target = inspect_sheet(sheets, drive, spreadsheet_id, **SHEET_OPTIONS)
-    existing = read_sheet_matrix(sheets, spreadsheet_id, **SHEET_OPTIONS)
-    if existing and existing[0] != HEADERS:
+    target = inspect_sheet(
+        sheets, drive, spreadsheet_id, **SHEET_OPTIONS, legacy_column_count=len(LEGACY_HEADERS),
+    )
+    column_count = target["gridProperties"]["columnCount"]
+    needs_expansion = column_count == len(LEGACY_HEADERS)
+    expected_header = LEGACY_HEADERS if needs_expansion else HEADERS
+    existing = read_sheet_matrix(
+        sheets, spreadsheet_id, sheet_title=SHEET_TITLE, column_count=column_count,
+    )
+    if existing and existing[0] != expected_header:
         raise ValueError("Cabeçalho divergente. Use a aba dedicada criada pelo comando.")
     if _same_matrix(existing, desired):
         return False
@@ -111,7 +141,7 @@ def publish_profitability_matrix(sheets, drive, spreadsheet_id, desired):
     row_count = target["gridProperties"]["rowCount"]
     rows = [
         {"values": [
-            {"userEnteredValue": (
+            {} if value is None else {"userEnteredValue": (
                 {"stringValue": value} if isinstance(value, str) else {"numberValue": value}
             )}
             for value in row
@@ -119,6 +149,10 @@ def publish_profitability_matrix(sheets, drive, spreadsheet_id, desired):
         for row in desired
     ]
     requests = []
+    if needs_expansion:
+        requests.append({"appendDimension": {
+            "sheetId": sheet_id, "dimension": "COLUMNS", "length": len(DETAIL_DIMENSIONS),
+        }})
     if len(rows) > row_count:
         requests.append({"appendDimension": {
             "sheetId": sheet_id, "dimension": "ROWS", "length": len(rows) - row_count,

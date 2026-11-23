@@ -1,4 +1,4 @@
--- Prévia de rentabilidade por empresa, competência, tipo de moeda e moeda.
+-- Prévia de rentabilidade por empresa, competência, moeda, planta, centro de lucro e evento CO-PA.
 -- Fórmulas e sinais da aba KE24 database, linha 15, de KE24_database_draft.xlsx.
 -- COALESCE(SUM(...), 0) reproduz a contribuição zero de campos vazios na soma.
 -- No custo de materiais, use 4RM Inbound Freight (c_4rm_inbound_freight)
@@ -29,6 +29,11 @@ WITH base AS (
     period_key,
     currency_type,
     currency,
+    period,
+    calendar_year,
+    plant,
+    profit_center,
+    NULLIF(copa_event_type, '') AS copa_event_type,
     COUNT(*) AS total_lancamentos,
     COALESCE(SUM(revenue), 0) AS ke24_revenue,
     COALESCE(SUM(c_1sales_return), 0) AS ke24_c_1sales_return,
@@ -127,7 +132,8 @@ WITH base AS (
     -COALESCE(SUM(interest_income), 0) AS ke24_interest_income,
     -COALESCE(SUM(income_taxes), 0) AS ke24_income_taxes
   FROM `datalake-pipeline.profitability_data.ke24_processed`
-  GROUP BY company_code, period_key, currency_type, currency
+  GROUP BY company_code, period_key, currency_type, currency, period, calendar_year,
+    plant, profit_center, NULLIF(copa_event_type, '')
 ),
 indicadores_1 AS (
   SELECT
@@ -202,6 +208,12 @@ SELECT
   gross_profit + operations_expenses AS industrial_op,
   other_operating_income_expense,
   other_financial_income_expense,
-  income_taxes
+  income_taxes,
+  period,
+  calendar_year,
+  plant,
+  profit_center,
+  copa_event_type
 FROM indicadores_4
-ORDER BY period_key, company_code, currency_type, currency;
+ORDER BY period_key, company_code, currency_type, currency, period, calendar_year,
+  plant, profit_center, copa_event_type;

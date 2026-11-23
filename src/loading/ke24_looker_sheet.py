@@ -156,6 +156,7 @@ def create_empty_sheet(
 def inspect_sheet(
     sheets_service, drive_service, spreadsheet_id, *,
     sheet_title=SHEET_TITLE, column_count=len(EXPORT_COLUMNS),
+    legacy_column_count=None,
 ):
     target = drive_service.files().get(
         fileId=spreadsheet_id,
@@ -176,7 +177,12 @@ def inspect_sheet(
         raise RuntimeError("Destino nao corresponde a uma planilha KE24 dedicada.")
     sheet = sheets[0]["properties"]
     grid = sheet.get("gridProperties", {})
-    if grid.get("columnCount") != column_count or not isinstance(sheet.get("sheetId"), int):
+    actual_column_count = grid.get("columnCount")
+    if (
+        not isinstance(actual_column_count, int)
+        or actual_column_count not in (column_count, legacy_column_count)
+        or not isinstance(sheet.get("sheetId"), int)
+    ):
         raise RuntimeError("Formato da aba nao corresponde ao contrato KE24.")
     return sheet
 
