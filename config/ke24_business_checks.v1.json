@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "policy_version": "1.0.0",
+  "policy_name": "KE24_OFFICIAL_BUSINESS_CHECKS",
+  "status": "ACTIVE",
+  "currency_type": 10,
+  "history": {
+    "previous_months": 3
+  },
+  "metrics": {
+    "revenue": {
+      "enabled": true,
+      "terms": [{"field": "revenue", "weight": 1.0}],
+      "medium_ratio": 0.30,
+      "high_ratio": 0.60
+    },
+    "material_cost_components": {
+      "enabled": true,
+      "prefixes": ["c_4rm_"],
+      "medium_ratio": 0.35,
+      "high_ratio": 0.65
+    },
+    "contribution_margin": {
+      "enabled": false,
+      "terms": [],
+      "medium_ratio": 0.25,
+      "high_ratio": 0.50
+    },
+    "operating_profit": {
+      "enabled": false,
+      "terms": [],
+      "medium_ratio": 0.25,
+      "high_ratio": 0.50
+    }
+  }
+}
